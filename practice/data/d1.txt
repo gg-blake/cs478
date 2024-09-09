@@ -1,0 +1,103 @@
+Blake Moody
+SOCIOL 101
+2/20/2022
+
+
+        Racial Bias in AI: Giving Humanity’s Greatest Creation One of Humanity’s Greatest Flaws
+
+
+Towards the beginning of the year, the IRS announced that it will be canceling its plan to expand its use of facial recognition toward identifying US citizens. This plan would have been in partnership with the third-party company, ID.me. The use of these facial recognition systems could have potentially been used for domestic law enforcement and cybersecurity. The IRS announced it would be shutting down its effort due to the immense backlash they have received. Many citizens were skeptical of this partnership with third-party company ID.me due to recent studies of its facial recognition technology and its ineffectiveness towards specific racial and ethnic groups. For example, in a 2019 study by the National Institute of Standards and Technology, 40+ AI technology organizations had their facial recognition machine learning algorithms tested for accuracy (Grother, et al., 2019). Results showed significantly less accuracy in identifying people of color than white people and were least accurate when identifying women of color.
+
+
+To understand why bias in these systems is forming and its source, it’s essential to have a basic understanding of how artificial intelligence systems are made. Neural networks are the basis of machine learning technology in which computer systems mimic how humans create and strengthen neurological connections through the repetition of tasks. Like humans, these neural networks must be trained with test situations so they can apply their knowledge to new scenarios. Creating a neural network in a lot of ways is similar to a child’s early stages of development. This stage is where key concepts, as well as key misconceptions, can be formed.  
+
+
+        Carnegie Mellon University has been at the forefront of machine learning development since the release of its Pose.Illumination.Expression (PIE) database. CMU recently made significant additions to its database, which it is calling the Multi-PIE database. A notable improvement worth mentioning is its significant increase in subject count. All of the faces being captured by the team at CMU were current members of the university. It is interesting to note that according to CMU’s statistics, white American graduate students make up 53% of all non-international graduate students. Despite this demographic of face datasets only representing a single region of America, Multi-PIE is a free-to-use dataset by anyone, anywhere. Training algorithms with databases like Multi-PIE, to recognize faces may be successful in their original region but can it be effective in recognizing different types of faces it hasn’t been trained to recognize?  
+
+
+ It has been established that neural networks mimic the human brain, so it makes sense that the way neural networks learn is also similar to how humans learn.  As humans are raised in an isolated environment, they associate what they recognize as safe and exhibit these biases throughout adulthood. This tendency to gravitate towards things that seem familiar can also be extended to people and as a result, humans all exhibit this behavior. This attraction to familiar persons or people that exhibit familial characteristics is called homophily. To be clear, homophily does not entirely represent systemic racism, racism is the idea to maintain homophily within a system. In fact, homophily is often a subconscious decision. Looking back at the Multi-PIE face dataset by Carnegie Mellon University, it is not the AI being trained that is racially biased. The bias comes from its environment and the people that create the face datasets. Even though according to the improvements of Multi-PIE to its predecessor, “Most notably a substantially larger number of subjects were imaged (337 vs. only 68 in PIE)”(Gross et al., 2010), a lot of this doesn’t matter when the people are coming from a similar background and share similar characteristics. Growing up as a biracial kid in a suburban north shore school system, locally I grew up as the only African American student out of a hundred other students. Even once I had left my local school system to attend a regional high school, I was still lacking exposure to classmates of different racial identities. My personal experience is a great example of how even when I am exposed to more people, diversity is the key factor in an environment in reducing homophily. An important example of how homophily isn’t always conscious is from week 4 of our course, in a 2014 Sociological Science study by Ashton Anderson and others, researchers analyzed presented racial dating preferences of over 250,000 users on an unspecified popular online dating app. The results of the participants' responses were plotted on the axis of political affiliation, gender, and race. The initial analysis showed that those of more conservative political affiliation self-reported similar racial identity as a must-have versus more moderate and liberal users. This must-have rate was also higher among white participants and female participants. After collecting data on the participants' self-reported responses, researchers decided to plot the actual likelihood that users of the dating app were to view another user's profile of a different race. The results of the second analysis showed that gender and racial identity all had similar trends concerning political affiliation. This means that despite specific people stating they would rather date someone of a particular race, it doesn’t necessarily translate to who they end up updating. This is an unconscious form of homophily that we discussed in class that shows how people aren’t always aware of their biases towards people.    
+Just as homophily can be seen in humans, it makes sense that we could see some form of homophily within AI. If a machine learning algorithm is only trained to recognize a specific subset of human faces, exposing the algorithm to new types of faces will cause it to misidentify subjects, and if implemented prematurely, could reinforce already prevalent racial biases in our country. If robots have the potential to view the world through an unbiased lens, perhaps they will have something to teach us.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Citations:
+Grother, P., Ngan, M., & Hanaoka, K. (2019). Face recognition vendor test part 3: Face Recognition Vendor Test (FRVT) Part 3: Demographic Effects. https://doi.org/10.6028/nist.ir.8280 
+Gross, R., Matthews, I., Cohn, J., Kanade, T., & Baker, S. (2010). Multi-pie. Image and Vision Computing, 28(5), 807–813. https://doi.org/10.1016/j.imavis.2009.08.002 
+Anderson, Ashton, et al. “Political Ideology and Racial Preferences in Online Dating.” Sociological Science, 2014, pp. 28–40. Crossref, https://doi.org/10.15195/v1.a3.
+
+
+“Pose and Illumination Images.” Cmu.Edu, Carnegie Mellon University, www.cs.cmu.edu/afs/cs/project/PIE/MultiPie/Multi-Pie/Content.html. Accessed 25 Feb. 2022.
+
+
+“2018 Student Enrollment by Citizenship, Race and Sex”, Cmu.Edu, Carnegie Mellon University, https://www.cmu.edu/ira/Enrollment/pdf/fall-2018-pdfs/university-facts-2018-student-enrollment-by-citizenship-race-sex.pdf. Accessed 20 Feb. 2022.
+
+
+Additional Resources:
+
+
+Buolamwini, Joy. “Artificial Intelligence Has a Problem With Gender and Racial Bias. Here’s How to Solve It.” Time, Time Magazine, 7 Feb. 2019, time.com/5520558/artificial-intelligence-racial-gender-bias.
+
+
+Vox Media, Inc. “Are We Automating Racism?” YouTube, uploaded by Vox, 31 Mar. 2021, www.youtube.com/watch?v=Ok5sKLXqynQ.
+
+
+Rachel Metz, CNN Business. “After Face-Recognition Backlash, ID.Me Says Government Agencies Will Get More Verification Options.” CNN, 9 Feb. 2022, edition.cnn.com/2022/02/08/tech/idme-facial-recognition-bypass/index.html.
