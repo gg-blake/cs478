@@ -65,6 +65,26 @@ class Tokenizer:
         self._merges = tmp_merges # used in encode()
         self._vocab = tmp_vocab   # used in decode()
 
+    # Prints the stats of a call to train()
+    def train_stats(self, training_text, encode_text, vocab_size):
+        # Reecord the old vocabulary and data sizes
+        data = self.encode(encode_text)
+        data_chars = sorted(list(set(data)))
+        data_vocab_size_untrained = len(data_chars)
+        data_size_untrained = len(data)
+
+        # Run the trainer
+        self.train(training_text, 300)
+
+        # Record the new vocabulary and data sizes
+        data = self.encode(encode_text)
+        data_chars = sorted(list(set(data)))
+        data_vocab_size_trained = len(data_chars)
+        data_size_trained = len(data)
+
+        # Print the stats
+        print(f"Untrained Vocab Size: {data_vocab_size_untrained}\nUntrained Data Size: {data_size_untrained}\nTrained Vocab Size: {data_vocab_size_trained}\nTrained Data Size: {data_size_trained}\nRatio: {data_size_untrained/data_size_trained}")
+
     # Helper function for the encode() method: Returns a list of tokens (integers) encoded from the given raw bytes
     def _encode_chunk(self, text_bytes):
         ids = list(text_bytes)
@@ -129,12 +149,13 @@ class Tokenizer:
 
 
 if __name__ == "__main__":
-    test_string = "Our discussions with The New York Times had appeared to be progressing constructively through our last communication on December 19. The negotiations focused on a high-value partnership around real-time display with attribution in ChatGPT, in which The New York Times would gain a new way to connect with their existing and new readers, and our users would gain access to their reporting. We had explained to The New York Times that, like any single source, their content didn't meaningfully contribute to the training of our existing models and also wouldn't be sufficiently impactful for future training. Their lawsuit on December 27—which we learned about by reading The New York Times—came as a surprise and disappointment to us."
+    test_string = "Our discussions with The New York Times had appeared to be progressing?onstructively through our last communication on December 19. The negotiations focused on a high-value partnership around real-time display with attribution in ChatGPT, in which The New York Times would gain a new way to connect with their existing and new readers, and our users would gain access to their reporting. We had explained to The New York Times that, like any single source, their content didn't meaningfully contribute to the training of our existing models and also wouldn't be sufficiently impactful for future training. Their lawsuit on December 27—which we learned about by reading The New York Times—came as a surprise and disappointment to us."
     text_bytes = list(test_string.encode("utf-8"))
 
     tokenizer = Tokenizer()
-    tokenizer.train(test_string, 270)
-    encoded_string = tokenizer.encode("What's up everyone! ComedyShortsGamer here! Today we're gonna be doing the hot knife challenge!")
-    print(encoded_string)
-    decoded_string = tokenizer.decode(encoded_string)
-    print(decoded_string)
+    with open("data/d3.txt") as f:
+        tokenizer_training_data = f.read()
+
+    with open("data/d2.txt") as f:
+        model_training_data = f.read()
+    tokenizer.train(tokenizer_training_data, 270, verbose=True)
