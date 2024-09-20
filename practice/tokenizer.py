@@ -149,13 +149,7 @@ class Tokenizer:
 
 
 if __name__ == "__main__":
-    test_string = "Our discussions with The New York Times had appeared to be progressing?onstructively through our last communication on December 19. The negotiations focused on a high-value partnership around real-time display with attribution in ChatGPT, in which The New York Times would gain a new way to connect with their existing and new readers, and our users would gain access to their reporting. We had explained to The New York Times that, like any single source, their content didn't meaningfully contribute to the training of our existing models and also wouldn't be sufficiently impactful for future training. Their lawsuit on December 27—which we learned about by reading The New York Times—came as a surprise and disappointment to us."
-    text_bytes = list(test_string.encode("utf-8"))
-
     tokenizer = Tokenizer()
-    with open("data/d3.txt") as f:
+    with open("input.txt") as f:
         tokenizer_training_data = f.read()
-
-    with open("data/d2.txt") as f:
-        model_training_data = f.read()
     tokenizer.train(tokenizer_training_data, 270, verbose=True)

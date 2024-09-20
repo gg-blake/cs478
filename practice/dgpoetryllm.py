@@ -1,35 +1,37 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import tokenizer
+
+
 
 batch_size = 4  # how many independent sequences will we process in parallel?
-block_size = 8  # what is the maximum context length for predictions?
-max_iters = 5000
-eval_interval = 200
-learning_rate = 1e-3
+block_size = 16  # what is the maximum context length for predictions?
+max_iters = 2500
+eval_interval = 500
+learning_rate = 3e-4
 eval_iters = 100
-n_embd = 20
+n_embd = 8
 n_head = 4
 n_layer = 4
 dropout = 0.2
 
 with open('lice.txt', 'r', encoding='utf-8') as f:
     text = f.read()
-chars = sorted(set(text))
-vocab_size = len(chars)
+with open('input.txt', 'r', encoding='utf-8') as f:
+    training_text = f.read()
 
-string_to_int = {ch: i for i, ch in enumerate(chars)}
-int_to_string = {i: ch for i, ch in enumerate(chars)}
+vocab_size = 500
+tk = tokenizer.Tokenizer()
+tk.train(text, vocab_size, verbose=False)
 
-encode = lambda s: [string_to_int[c] for c in s]
-decode = lambda l: ''.join([int_to_string[i] for i in l])
-
-data = torch.tensor(encode(text), dtype=torch.long)
+data = torch.tensor(tk.encode(text), dtype=torch.long)
 
 
 n = int(0.8*len(data))
 train_data = data[:n]
 val_data = data[n:]
+
 
 
 @torch.no_grad()
@@ -220,6 +222,7 @@ class BigramLanguageModel(nn.Module):
 
 
 m = BigramLanguageModel()
+m = torch.load('model.pth', weights_only=False)
 # PyTorch Optimizer
 optimizer = torch.optim.AdamW(m.parameters(), lr=learning_rate)
 
@@ -240,5 +243,6 @@ for iter in range(max_iters):
 print(loss.item())
 
 context = torch.zeros((1, 1), dtype=torch.long, device='cpu')
-generated_chars = decode(m.generate(context, max_new_tokens=500)[0].tolist())
+generated_chars = tk.decode(m.generate(context, max_new_tokens=500)[0].tolist())
 print(generated_chars)
+torch.save(m, 'model.pth')
