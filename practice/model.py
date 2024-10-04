@@ -3,14 +3,14 @@ import torch.nn as nn
 from torch.nn import functional as F
 import tokenizer
 
-
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 batch_size = 4  # how many independent sequences will we process in parallel?
-block_size = 16  # what is the maximum context length for predictions?
 max_iters = 2500
 eval_interval = 500
-learning_rate = 3e-4
+learning_rate = 3e-1
 eval_iters = 100
+block_size = 16  # what is the maximum context length for predictions?
 n_embd = 8
 n_head = 4
 n_layer = 4
@@ -21,9 +21,10 @@ with open('lice.txt', 'r', encoding='utf-8') as f:
 with open('input.txt', 'r', encoding='utf-8') as f:
     training_text = f.read()
 
+
 vocab_size = 500
 tk = tokenizer.Tokenizer()
-tk.train(text, vocab_size, verbose=False)
+tk.train(text, vocab_size, verbose=True)
 
 data = torch.tensor(tk.encode(text), dtype=torch.long)
 
@@ -32,6 +33,25 @@ n = int(0.8*len(data))
 train_data = data[:n]
 val_data = data[n:]
 
+
+def get_batch(split):
+    data = train_data if split == 'train' else val_data
+    ix = torch.randint(len(data) - block_size, (batch_size,))
+    # print(ix)
+    x = torch.stack([data[i:i + block_size] for i in ix])
+    y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
+    return x, y
+
+
+x, y = get_batch('train')
+
+x = train_data[:block_size]
+y = train_data[1:block_size + 1]
+
+for t in range(block_size):
+    context = x[:t+1]
+    target = y[t]
+    # print('when input is ', context, 'target is ', target)
 
 
 @torch.no_grad()
@@ -47,34 +67,6 @@ def estimate_loss():
         out[split] = losses.mean()
     m.train()
     return out
-
-
-def get_batch(split):
-    data = train_data if split == 'train' else val_data
-    ix = torch.randint(len(data) - block_size, (batch_size,))
-    # print(ix)
-    x = torch.stack([data[i:i + block_size] for i in ix])
-    y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
-    return x, y
-
-
-x, y = get_batch('train')
-'''
-print('inputs: ')
-# print(x.shape)
-print(x)
-print('targets: ')
-print(y)
-'''
-
-
-x = train_data[:block_size]
-y = train_data[1:block_size + 1]
-
-for t in range(block_size):
-    context = x[:t+1]
-    target = y[t]
-    # print('when input is ', context, 'target is ', target)
 
 
 class LayerNorm1d:
@@ -95,8 +87,6 @@ class LayerNorm1d:
 
     def parameters(self):
         return [self.gamma, self.beta]
-
-
 
 
 class FeedForward(nn.Module):
@@ -172,8 +162,8 @@ class Head(nn.Module):
         out = wei @ v # (B, T, T) @ (B, T, C) ---> (B, T, C)
         return out
 
-class BigramLanguageModel(nn.Module):
-    def __init__(self):
+class LanguageModel(nn.Module):
+    def __init__(self, vocab_size):
         super().__init__()
         # each token directly reads off the logits for the next token from the lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
@@ -181,13 +171,17 @@ class BigramLanguageModel(nn.Module):
         self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_layer)])
         self.ln_f = nn.LayerNorm(n_embd) # final layer norm
         self.lm_head = nn.Linear(n_embd, vocab_size)
+        self.block_size = block_size
+
+    def get_block_size(self):
+        return self.block_size
 
     def forward(self, index, targets=None):
         B, T = index.shape
 
         # index and targets are both (B, T) tensor of integers
         tok_emb = self.token_embedding_table(index)  # (B, T, C)
-        pos_emb = self.position_embedding_table(torch.arange(T, device='cpu'))  # (T, C)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device))  # (T, C)
         x = tok_emb + pos_emb  # (B, T, C)
         x = self.blocks(x)  # (B, T, C)
         x = self.ln_f(x)  # (B, T, C)
@@ -221,8 +215,14 @@ class BigramLanguageModel(nn.Module):
         return index
 
 
-m = BigramLanguageModel()
-m = torch.load('model.pth', weights_only=False)
+m = LanguageModel(vocab_size)
+m.load_state_dict(torch.load('weights.pth', weights_only=True))
+m.eval()
+
+
+
+
+
 # PyTorch Optimizer
 optimizer = torch.optim.AdamW(m.parameters(), lr=learning_rate)
 
@@ -242,7 +242,7 @@ for iter in range(max_iters):
 
 print(loss.item())
 
-context = torch.zeros((1, 1), dtype=torch.long, device='cpu')
+context = torch.zeros((1, 1), dtype=torch.long, device=device)
 generated_chars = tk.decode(m.generate(context, max_new_tokens=500)[0].tolist())
 print(generated_chars)
-torch.save(m, 'model.pth')
+torch.save(m.state_dict(), 'weights.pth')
