@@ -7,6 +7,13 @@ Date : 9-9-2024
 import regex as re
 from tqdm import tqdm
 import unicodedata
+import pickle
+from multiprocessing import shared_memory
+import struct  # Used to pack/unpack the length
+import multiprocessing
+import time
+import numpy as np
+import os
 
 GPT4_SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
 
@@ -36,6 +43,7 @@ class Tokenizer:
         self._merges = {}
         self._special_tokens = {}
         self._vocab = self._build_vocab()
+        self._mergeable_ranks = {}
     
     # Helper method to initialize an instance's vocabulary
     def _build_vocab(self):
@@ -45,6 +53,22 @@ class Tokenizer:
         for special, idx in self._special_tokens.items():
             vocab[idx] = special.encode("utf-8")
         return vocab
+    
+    def _build_mergeable_ranks(self, text):
+        loader = tqdm(total=len(text), desc="Building mergeable ranks", unit="chars")
+        text_chunks = re.findall(self.compiled_pattern, text)
+        encoded_chunks = [list(chunk.encode("utf-8")) for chunk in text_chunks]
+        for chunk in encoded_chunks:
+            for p0, p1 in zip(chunk, chunk[1:]):
+                if (p0, p1) not in self._mergeable_ranks.keys():
+                    self._mergeable_ranks[(p0, p1)] = 1
+                    continue
+
+                self._mergeable_ranks[(p0, p1)] = self._mergeable_ranks[(p0, p1)] + 1
+                loader.update()
+
+        loader.close()
+
 
     # Train the tokenizer on the given text
     # NOTE: This training method will also force prevent merges between different chunks of text. Chunks are formed by the regex pattern used by GPT-4
@@ -66,26 +90,27 @@ class Tokenizer:
         tmp_merges = self._merges.copy()
 
         print(f"Training on {len(ids)} chunks of text...")
-        loader = tqdm(total=vocab_size)
+        loader = tqdm(total=vocab_size, desc="Training BPE", unit="merges")
         #loader.update(n=len(tmp_vocab))
         i = 0
         # BPE: Iteratively merge the most common consecutive pairings of bytes
         
         while len(tmp_vocab) < vocab_size:
             # Get the frequency stats for all chunks of text
-            text_bytes_freq = {}
+            '''text_bytes_freq = {}
             for chunk_ids in ids:
-                text_bytes_freq = self._pair_freq(chunk_ids, text_bytes_freq)
+                text_bytes_freq = self._pair_freq(chunk_ids, text_bytes_freq)'''
 
             # Store the most freq pair
-            freq_pair = max(text_bytes_freq, key=lambda x: text_bytes_freq[x])
+            freq_pair = max(self._mergeable_ranks, key=lambda x: self._mergeable_ranks[(x[0], x[1])])
             idx = 256 + i
-            ids = [self._merge(chunk_ids, freq_pair, idx) for chunk_ids in ids]
+            '''if verbose:
+                print(f"merge {i+1}/{num_merges}: {freq_pair} -> {idx} ({tmp_vocab[idx]}) had {self._mergeable_ranks[freq_pair]} occurrences")'''
+            ids = [self._merge_update(chunk_ids, freq_pair, idx) for chunk_ids in ids]
             tmp_merges[freq_pair] = idx
             tmp_vocab[idx] = tmp_vocab[freq_pair[0]] + tmp_vocab[freq_pair[1]]
 
-            if verbose:
-                print(f"merge {i+1}/{num_merges}: {freq_pair} -> {idx} ({tmp_vocab[idx]}) had {text_bytes_freq[freq_pair]} occurrences")
+            
 
             loader.update()
             i += 1
@@ -95,6 +120,8 @@ class Tokenizer:
         # Save instance variables
         self._merges = tmp_merges # used in encode()
         self._vocab = tmp_vocab   # used in decode()
+
+
 
     # Prints the stats of a call to train()
     def train_stats(self, training_text, encode_text, vocab_size):
@@ -163,7 +190,43 @@ class Tokenizer:
             else:
                 result.append(text_bytes[index])
                 index += 1
+                
+        return result
+    
+    # Helper function for BPE (Byte-Pair Encoding); replace all occurences of a pair of utf-8 characters with a symbolic replacement and returns the result
+    def _merge_update(self, text_bytes, pair, replacement_id):
+        result = []
+        index = 1
+        # Linearly search through all the consecutive pairs in text_bytes and rpelace them with a symbolic replacement
+        self._mergeable_ranks[(pair[0], pair[1])] = 0
+        replacements_found = 0
+        while index < len(text_bytes):
+            if text_bytes[index-1] == pair[0] and text_bytes[index] == pair[1]:
+                if index > 1:
+                    replacements_found += 1
+                    self._mergeable_ranks[(result[-1], replacement_id)] = replacements_found
+                    
+                result.append(replacement_id)
+                index += 2
+            else:
+                result.append(text_bytes[index])
+                index += 1
 
+        
+
+        '''index = 0
+        while index < len(result):
+            if index < len(result) - 1 and result[index+1] == replacement_id:
+                if (result[index], replacement_id) not in self._mergeable_ranks.keys():
+                    self._mergeable_ranks[(result[index], replacement_id)] = 1
+                    index += 2
+                    continue
+
+                self._mergeable_ranks[(result[index], result[index+1])] = self._mergeable_ranks[(result[index], result[index+1])] + 1
+                index += 2
+            else:
+                index += 1'''
+                
         return result
 
     # Helper function for BPE (Byte-Pair Encoding); Returns an dictionary containing all existing consecutive character pairs as keys and their respective frequency as the value
@@ -250,18 +313,36 @@ class Tokenizer:
 
 
 if __name__ == "__main__":
-    VOCAB_SIZE = 200000
+    VOCAB_SIZE = 3000
     tokenizer = Tokenizer()
     tokenizer_training_data = ""
-    with open("data/threebody.txt") as g:
-        tokenizer_training_data += g.read()
 
-    try:
-        tokenizer.load("save4.model")
+    
+    files = [file for file in os.listdir("data")]
+    loader = tqdm(total=len(files), desc="Compiling training data")
+    for file in files:
+        with open(f"data/{file}") as g:
+            tokenizer_training_data += g.read()
+        g.close()
+        loader.update()
+    loader.close()
+
+    tokenizer._build_mergeable_ranks(tokenizer_training_data)
+    tokenizer.train(tokenizer_training_data, VOCAB_SIZE, verbose=True)
+    e = tokenizer.encode("Hello, my name is Blake. What is your name?")
+    print(tokenizer._vocab)
+    pair = max(tokenizer._mergeable_ranks, key=lambda x: tokenizer._mergeable_ranks[(x[0], x[1])])
+    print(tokenizer._vocab[pair[0]], tokenizer._vocab[pair[1]])
+
+
+    '''try:
+        tokenizer.load("tokenizer_models/umb2M.model")
     except FileNotFoundError:
-        tokenizer.train(tokenizer_training_data, VOCAB_SIZE)
+        try:
+            tokenizer.train(tokenizer_training_data, VOCAB_SIZE)
+        except KeyboardInterrupt:
+            print("Training interrupted. Saving model...")
+        tokenizer.save("tokenizer_models/umb2M")'''
 
-    tokenizer.save("save4")
-    e = tokenizer.encode("Llama is an accessible, open large language model (LLM) designed for developers, researchers, and businesses to build, experiment, and responsibly scale their generative AI ideas. Part of a foundational system, it serves as a bedrock for innovation in the global community. A few key aspects: Open access: Easy accessibility to cutting-edge large language models, fostering collaboration and advancements among developers, researchers, and organizations\nBroad ecosystem: Llama models have been downloaded hundreds of millions of times, there are thousands of community projects built on Llama and platform support is broad from cloud providers to startups - the world is building with Llama!\nTrust & safety: Llama models are part of a comprehensive approach to trust and safety, releasing models and tools that are designed to enable community collaboration and encourage the standardization of the development and usage of trust and safety tools for generative AI\nOur mission is to empower individuals and industry through this opportunity while fostering an environment of discovery and ethical AI advancements. The model weights are licensed for researchers and commercial entities, upholding the principles of openness.")
-    t = [tokenizer._vocab[i] for i in e]
-    print(t)
+# This is the command to download the umb website
+# wget -m -k -K -E -l 7 -t 6 -w 5 https://www.umb.edu/
