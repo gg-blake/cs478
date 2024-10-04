@@ -15,6 +15,10 @@ import time
 import numpy as np
 import os
 
+import math
+def clamp(value, min_value, max_value):
+  return max(min(value, max_value), min_value)
+
 GPT4_SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
 
 def replace_control_characters(s: str) -> str:
@@ -97,18 +101,20 @@ class Tokenizer:
         
         while len(tmp_vocab) < vocab_size:
             # Get the frequency stats for all chunks of text
-            '''text_bytes_freq = {}
+            text_bytes_freq = {}
             for chunk_ids in ids:
-                text_bytes_freq = self._pair_freq(chunk_ids, text_bytes_freq)'''
+                text_bytes_freq = self._pair_freq(chunk_ids, text_bytes_freq)
 
             # Store the most freq pair
-            freq_pair = max(self._mergeable_ranks, key=lambda x: self._mergeable_ranks[(x[0], x[1])])
+            freq_pair = max(text_bytes_freq, key=lambda x: text_bytes_freq[(x[0], x[1])])
             idx = 256 + i
-            '''if verbose:
-                print(f"merge {i+1}/{num_merges}: {freq_pair} -> {idx} ({tmp_vocab[idx]}) had {self._mergeable_ranks[freq_pair]} occurrences")'''
-            ids = [self._merge_update(chunk_ids, freq_pair, idx) for chunk_ids in ids]
+            
+            ids = [self._merge(chunk_ids, freq_pair, idx) for chunk_ids in ids]
             tmp_merges[freq_pair] = idx
             tmp_vocab[idx] = tmp_vocab[freq_pair[0]] + tmp_vocab[freq_pair[1]]
+
+            if verbose:
+                print(f"merge {i+1}/{num_merges}: {freq_pair} -> {idx} ({tmp_vocab[idx]}) had {text_bytes_freq[freq_pair]} occurrences")
 
             
 
@@ -199,17 +205,37 @@ class Tokenizer:
         index = 1
         # Linearly search through all the consecutive pairs in text_bytes and rpelace them with a symbolic replacement
         self._mergeable_ranks[(pair[0], pair[1])] = 0
+        pivot = 0 # The index of the last replacement
         replacements_found = 0
         while index < len(text_bytes):
-            if text_bytes[index-1] == pair[0] and text_bytes[index] == pair[1]:
-                if index > 1:
-                    replacements_found += 1
-                    self._mergeable_ranks[(result[-1], replacement_id)] = replacements_found
+            current_pair = (text_bytes[index-1], text_bytes[index]) if index > 0 else None
+            current_pair_left = (text_bytes[index-2], text_bytes[index-1]) if index > 1 else None
+            #current_pair_left = (result[-1], text_bytes[index-1]) if len(result) > 0 else None
+            current_pair_right = (text_bytes[index], text_bytes[index+1]) if index < len(text_bytes) - 1 else None
+            if current_pair == pair:
+                replacements_found += 1
+                if len(result) > 0:
+                    # (left_char, *) -> +1
+                    self._mergeable_ranks[(result[-1], replacement_id)] = self._mergeable_ranks[(result[-1], replacement_id)] + 1 if (result[-1], replacement_id) in self._mergeable_ranks.keys() else 1
+
+                # (left neighbor char, pair_left_char) -> -1
+                if current_pair_left is not None:
+                    self._mergeable_ranks[current_pair_left] = int(clamp(self._mergeable_ranks[current_pair_left] - 1, 0, math.inf))
+
+                # (right neighbor char, pair_right_char) -> -1
+                if current_pair_right is not None:
+                    self._mergeable_ranks[current_pair_right] = int(clamp(self._mergeable_ranks[current_pair_right] - 1, 0, math.inf))
                     
+                
                 result.append(replacement_id)
+                pivot = len(result) - 1
                 index += 2
             else:
-                result.append(text_bytes[index])
+                result.append(text_bytes[index-1])
+                # (*, right_char) -> +1
+                if len(result) - 1 > pivot and result[-2] == replacement_id:
+                    self._mergeable_ranks[(replacement_id, result[-1])] = self._mergeable_ranks[(replacement_id, result[-1])] + 1 if (replacement_id, result[-1]) in self._mergeable_ranks.keys() else 1
+
                 index += 1
 
         
@@ -313,7 +339,7 @@ class Tokenizer:
 
 
 if __name__ == "__main__":
-    VOCAB_SIZE = 3000
+    VOCAB_SIZE = 1000
     tokenizer = Tokenizer()
     tokenizer_training_data = ""
 
@@ -328,7 +354,7 @@ if __name__ == "__main__":
     loader.close()
 
     tokenizer._build_mergeable_ranks(tokenizer_training_data)
-    tokenizer.train(tokenizer_training_data, VOCAB_SIZE, verbose=True)
+    tokenizer.train(tokenizer_training_data, VOCAB_SIZE)
     e = tokenizer.encode("Hello, my name is Blake. What is your name?")
     print(tokenizer._vocab)
     pair = max(tokenizer._mergeable_ranks, key=lambda x: tokenizer._mergeable_ranks[(x[0], x[1])])
