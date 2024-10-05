@@ -41,7 +41,6 @@ def replace_multiple(pairs, shared_ids):
         p.join()
 
 def replace_sequential(pairs, shared_ids):
-    result = shared_ids[:]
     """
     Replace multiple neighboring pairs in the shared 'ids' sequentially.
     
@@ -49,6 +48,7 @@ def replace_sequential(pairs, shared_ids):
                               (pair, symbol, empty_symbol)
     :param shared_ids: Shared array for multiprocessing (no locking).
     """
+    result = shared_ids[:]
     for i, pair in enumerate(pairs):
         result = replace_pair(result, pair, 256+i)
 
