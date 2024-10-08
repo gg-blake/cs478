@@ -4,22 +4,47 @@ Description : Encodes a string of text to a series of tokens where tokens are co
 Author : Blake Moody
 Date : 9-9-2024
 """
+import multiprocessing
 import regex as re
 from tqdm import tqdm
 import unicodedata
 import pickle
-from multiprocessing import shared_memory
-import struct  # Used to pack/unpack the length
 import multiprocessing
+import struct  # Used to pack/unpack the length
 import time
 import numpy as np
 import os
+from benchmark import benchmark
 
 import math
 def clamp(value, min_value, max_value):
   return max(min(value, max_value), min_value)
 
 GPT4_SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
+
+# Helper function for BPE (Byte-Pair Encoding); Returns an dictionary containing all existing consecutive character pairs as keys and their respective frequency as the value
+def _pair_freq(text_bytes, pair_freq_counts=None):
+    pair_freq = {} if pair_freq_counts is None else pair_freq_counts
+    for p0, p1 in zip(text_bytes, text_bytes[1:]):
+        if (p0, p1) not in pair_freq.keys():
+            pair_freq[(p0, p1)] = 1
+            continue
+
+        pair_freq[(p0, p1)] = pair_freq[(p0, p1)] + 1
+
+    return pair_freq
+
+def _increase_frequency(freq, pair):
+    if pair not in freq.keys():
+        freq[pair] = 1
+    else:
+        freq[pair] += 1
+
+def _decrease_frequency(freq, pair):
+    if pair not in freq.keys():
+        freq[pair] = 0
+    else:
+        freq[pair] -= 1
 
 def replace_control_characters(s: str) -> str:
     # we don't want to print control characters
@@ -40,6 +65,113 @@ def render_token(t: bytes) -> str:
     s = replace_control_characters(s)
     return s
 
+def _merge_naive(text_bytes, pair, replacement_id):
+        result = []
+        index = 0
+        # Linearly search through all the consecutive pairs in text_bytes and rpelace them with a symbolic replacement
+        while index < len(text_bytes):
+            if index < len(text_bytes) - 1 and text_bytes[index] == pair[0] and text_bytes[index+1] == pair[1]:
+                result.append(replacement_id)
+                index += 2
+            else:
+                result.append(text_bytes[index])
+                index += 1
+                
+        return result
+
+def _merge_naive_worker(shared_ids, text_bytes, pair, replacement_id, start, end, shared_diff):
+        result = []
+        index = 0
+        # Linearly search through all the consecutive pairs in text_bytes and rpelace them with a symbolic replacement
+        while index < len(text_bytes):
+            if index < len(text_bytes) - 1 and text_bytes[index] == pair[0] and text_bytes[index+1] == pair[1]:
+                result.append(replacement_id)
+                index += 2
+            else:
+                result.append(text_bytes[index])
+                index += 1
+                
+        diff = len(text_bytes) - len(result)
+        print(start-shared_diff.value, end-shared_diff.value-diff)
+        shared_ids[start-shared_diff.value:end-shared_diff.value-diff] = result
+        shared_diff.value -= diff
+        return result
+
+def _merge(freq, text_bytes, pair, replacement_id):
+    result = []
+    freq[(replacement_id, replacement_id)] = 0
+    count = 0
+    index = 0
+    while index < len(text_bytes):
+        if index < len(text_bytes) - 1 and text_bytes[index] == pair[0] and text_bytes[index+1] == pair[1]:
+            count += 1
+            result.append(replacement_id)
+            
+            if index - 2 >= 0:
+                LNPO = (text_bytes[index-1], text_bytes[index]) # Left Neighbor Pair Old
+                LRP = (text_bytes[index-1], replacement_id)
+                _decrease_frequency(freq, LNPO)
+                # Check if there was a matching pair immediately before
+                if text_bytes[index-2] == pair[0] and text_bytes[index-1] == pair[1]:
+                    # If there isn't an immediate neighboring pair,
+                    _decrease_frequency(freq, LNPO) # This will prevent a redundant increase of the pair (text_bytes[index-1], text_bytes[index])
+                    _decrease_frequency(freq, (replacement_id, text_bytes[index])) # We need to undo a frequency update of the last pair (replacement_id, text_bytes[index])
+                else:
+                    # If there isn't an immediate neighboring pair, then we can increment the replacement left pair by one
+                    _increase_frequency(freq, LRP)
+            elif index - 1 >= 0:
+                # Check if there was a matching pair immediately before
+                LNPO = (text_bytes[index-1], text_bytes[index]) # Left Neighbor Pair Old
+                _decrease_frequency(freq, LNPO)
+                LRP = (text_bytes[index-1], replacement_id)
+                _increase_frequency(freq, LRP)
+
+            if index + 3 < len(text_bytes):
+                RNPO = (text_bytes[index+1], text_bytes[index+2]) # Right Neighbor Pair Old
+                RRP = (replacement_id, text_bytes[index+2]) # Right Replacement Pair
+                _decrease_frequency(freq, RNPO)
+                if  not (text_bytes[index+2] == pair[0] and text_bytes[index+3] == pair[1]):
+                    _increase_frequency(freq, RRP)
+                else:
+                    _increase_frequency(freq, (replacement_id, replacement_id))
+            elif index + 2 < len(text_bytes):
+                RNPO = (text_bytes[index+1], text_bytes[index+2]) # Right Neighbor Pair Old
+                RRP = (replacement_id, text_bytes[index+2]) # Right Replacement Pair
+                _decrease_frequency(freq, RNPO)
+                _increase_frequency(freq, RRP)
+
+            index += 2
+
+        else:
+            result.append(text_bytes[index])
+            index += 1
+
+    
+
+    freq[pair] = 0
+
+    return result
+
+def merge_chunk(freq, text_bytes, pairs, replacement_id):
+    
+    manager = multiprocessing.Manager()
+    shared_ids = multiprocessing.Array('i', text_bytes, lock=False)
+    shared_freq = manager.dict(freq)
+    
+    processes = []
+    for i, pair in enumerate(pairs):
+        # Create a new process for each pair to replace
+        p = multiprocessing.Process(target=_merge, args=(shared_freq, shared_ids, pair, replacement_id+i))
+        processes.append(p)
+        p.start()
+        
+    # Ensure all processes complete
+    for p in processes:
+        p.join()
+    
+    
+    return shared_ids[:]
+
 class Tokenizer:
     def __init__(self, pattern=None):
         self.pattern = GPT4_SPLIT_PATTERN if pattern is None else pattern
@@ -57,26 +189,11 @@ class Tokenizer:
         for special, idx in self._special_tokens.items():
             vocab[idx] = special.encode("utf-8")
         return vocab
-    
-    def _build_mergeable_ranks(self, text):
-        loader = tqdm(total=len(text), desc="Building mergeable ranks", unit="chars")
-        text_chunks = re.findall(self.compiled_pattern, text)
-        encoded_chunks = [list(chunk.encode("utf-8")) for chunk in text_chunks]
-        for chunk in encoded_chunks:
-            for p0, p1 in zip(chunk, chunk[1:]):
-                if (p0, p1) not in self._mergeable_ranks.keys():
-                    self._mergeable_ranks[(p0, p1)] = 1
-                    continue
-
-                self._mergeable_ranks[(p0, p1)] = self._mergeable_ranks[(p0, p1)] + 1
-                loader.update()
-
-        loader.close()
 
 
     # Train the tokenizer on the given text
     # NOTE: This training method will also force prevent merges between different chunks of text. Chunks are formed by the regex pattern used by GPT-4
-    def train(self, text, vocab_size, verbose=False):
+    def train_naive(self, text, vocab_size, verbose=False):
         assert vocab_size >= 256
 
         # Only add vocab_size number of symbols to the vocabulary
@@ -103,23 +220,73 @@ class Tokenizer:
             # Get the frequency stats for all chunks of text
             text_bytes_freq = {}
             for chunk_ids in ids:
-                text_bytes_freq = self._pair_freq(chunk_ids, text_bytes_freq)
+                text_bytes_freq = _pair_freq(chunk_ids, text_bytes_freq)
 
             # Store the most freq pair
             freq_pair = max(text_bytes_freq, key=lambda x: text_bytes_freq[(x[0], x[1])])
             idx = 256 + i
             
-            ids = [self._merge(chunk_ids, freq_pair, idx) for chunk_ids in ids]
+            ids = [_merge_naive(chunk_ids, freq_pair, idx) for chunk_ids in ids]
             tmp_merges[freq_pair] = idx
             tmp_vocab[idx] = tmp_vocab[freq_pair[0]] + tmp_vocab[freq_pair[1]]
 
             if verbose:
                 print(f"merge {i+1}/{num_merges}: {freq_pair} -> {idx} ({tmp_vocab[idx]}) had {text_bytes_freq[freq_pair]} occurrences")
 
-            
-
             loader.update()
             i += 1
+
+        loader.close()
+
+        # Save instance variables
+        self._merges = tmp_merges # used in encode()
+        self._vocab = tmp_vocab   # used in decode()
+
+    # Train the tokenizer on the given text
+    # NOTE: This training method will also force prevent merges between different chunks of text. Chunks are formed by the regex pattern used by GPT-4
+    def train(self, text, vocab_size, verbose=False):
+        assert vocab_size >= 256
+
+        # Only add vocab_size number of symbols to the vocabulary
+        num_merges = vocab_size - len(self._vocab)
+
+        # Split the text up into text chunks
+        text_chunks = re.findall(self.compiled_pattern, text)
+
+        # Input text preprocessing
+        # Convert the string to a list of utf-8 bytes
+        ids = [list(ch.encode("utf-8")) for ch in text_chunks]
+
+        # Store the resulting vocab table and merge table in temporary variables
+        tmp_vocab = self._vocab.copy()
+        tmp_merges = self._merges.copy()
+
+        print(f"Training on {len(ids)} chunks of text...")
+        loader = tqdm(total=vocab_size, desc="Training BPE", unit="merges")
+        #loader.update(n=len(tmp_vocab))
+        index_i = 0
+        # BPE: Iteratively merge the most common consecutive pairings of bytes
+        self._mergeable_ranks = {}
+        for chunk_ids in ids:
+            self._mergeable_ranks = _pair_freq(chunk_ids, self._mergeable_ranks)
+        
+        while len(tmp_vocab) < vocab_size:
+            # Store the most freq pair
+            freq_pair = max(self._mergeable_ranks, key=lambda x: self._mergeable_ranks[(x[0], x[1])])
+            idx = 256 + index_i
+                
+            
+            ids = [_merge(self._mergeable_ranks, chunk_ids, freq_pair, idx) for chunk_ids in ids]
+            
+            tmp_merges[freq_pair] = idx
+            tmp_vocab[idx] = tmp_vocab[freq_pair[0]] + tmp_vocab[freq_pair[1]]
+                
+
+            '''if verbose:
+                print(f"merge {i+1}/{num_merges}: {freq_pair} -> {idx} ({tmp_vocab[idx]}) had {self._mergeable_ranks[freq_pair]} occurrences")'''
+
+            loader.update()
+            index_i += 1
 
         loader.close()
 
@@ -153,13 +320,13 @@ class Tokenizer:
     def _encode_chunk(self, text_bytes):
         ids = list(text_bytes)
         while len(ids) >= 2:
-            freq = self._pair_freq(ids)
+            freq = _pair_freq(ids)
             recent_pair = min(freq, key=lambda x: self._merges.get(x, float("inf")))
             if recent_pair not in self._merges:
                 break
 
             idx = self._merges[recent_pair]
-            ids = self._merge(ids, recent_pair, idx)
+            ids = _merge_naive(ids, recent_pair, idx)
 
         return ids
     
@@ -184,88 +351,15 @@ class Tokenizer:
         text = tokens.decode("utf-8", errors="replace")
         return text
     
-    # Helper function for BPE (Byte-Pair Encoding); replace all occurences of a pair of utf-8 characters with a symbolic replacement and returns the result
-    def _merge(self, text_bytes, pair, replacement_id):
-        result = []
-        index = 0
-        # Linearly search through all the consecutive pairs in text_bytes and rpelace them with a symbolic replacement
-        while index < len(text_bytes):
-            if index < len(text_bytes) - 1 and text_bytes[index] == pair[0] and text_bytes[index+1] == pair[1]:
-                result.append(replacement_id)
-                index += 2
-            else:
-                result.append(text_bytes[index])
-                index += 1
-                
-        return result
     
-    # Helper function for BPE (Byte-Pair Encoding); replace all occurences of a pair of utf-8 characters with a symbolic replacement and returns the result
-    def _merge_update(self, text_bytes, pair, replacement_id):
-        result = []
-        index = 1
-        # Linearly search through all the consecutive pairs in text_bytes and rpelace them with a symbolic replacement
-        self._mergeable_ranks[(pair[0], pair[1])] = 0
-        pivot = 0 # The index of the last replacement
-        replacements_found = 0
-        while index < len(text_bytes):
-            current_pair = (text_bytes[index-1], text_bytes[index]) if index > 0 else None
-            current_pair_left = (text_bytes[index-2], text_bytes[index-1]) if index > 1 else None
-            #current_pair_left = (result[-1], text_bytes[index-1]) if len(result) > 0 else None
-            current_pair_right = (text_bytes[index], text_bytes[index+1]) if index < len(text_bytes) - 1 else None
-            if current_pair == pair:
-                replacements_found += 1
-                if len(result) > 0:
-                    # (left_char, *) -> +1
-                    self._mergeable_ranks[(result[-1], replacement_id)] = self._mergeable_ranks[(result[-1], replacement_id)] + 1 if (result[-1], replacement_id) in self._mergeable_ranks.keys() else 1
-
-                # (left neighbor char, pair_left_char) -> -1
-                if current_pair_left is not None:
-                    self._mergeable_ranks[current_pair_left] = int(clamp(self._mergeable_ranks[current_pair_left] - 1, 0, math.inf))
-
-                # (right neighbor char, pair_right_char) -> -1
-                if current_pair_right is not None:
-                    self._mergeable_ranks[current_pair_right] = int(clamp(self._mergeable_ranks[current_pair_right] - 1, 0, math.inf))
-                    
-                
-                result.append(replacement_id)
-                pivot = len(result) - 1
-                index += 2
-            else:
-                result.append(text_bytes[index-1])
-                # (*, right_char) -> +1
-                if len(result) - 1 > pivot and result[-2] == replacement_id:
-                    self._mergeable_ranks[(replacement_id, result[-1])] = self._mergeable_ranks[(replacement_id, result[-1])] + 1 if (replacement_id, result[-1]) in self._mergeable_ranks.keys() else 1
-
-                index += 1
-
+    
+        
+            
+        
         
 
-        '''index = 0
-        while index < len(result):
-            if index < len(result) - 1 and result[index+1] == replacement_id:
-                if (result[index], replacement_id) not in self._mergeable_ranks.keys():
-                    self._mergeable_ranks[(result[index], replacement_id)] = 1
-                    index += 2
-                    continue
 
-                self._mergeable_ranks[(result[index], result[index+1])] = self._mergeable_ranks[(result[index], result[index+1])] + 1
-                index += 2
-            else:
-                index += 1'''
-                
-        return result
-
-    # Helper function for BPE (Byte-Pair Encoding); Returns an dictionary containing all existing consecutive character pairs as keys and their respective frequency as the value
-    def _pair_freq(self, text_bytes, pair_freq_counts=None):
-        pair_freq = {} if pair_freq_counts is None else pair_freq_counts
-        for p0, p1 in zip(text_bytes, text_bytes[1:]):
-            if (p0, p1) not in pair_freq.keys():
-                pair_freq[(p0, p1)] = 1
-                continue
-
-            pair_freq[(p0, p1)] = pair_freq[(p0, p1)] + 1
-
-        return pair_freq
+    
     
     def save(self, file_prefix):
         """
@@ -337,38 +431,71 @@ class Tokenizer:
         self._special_tokens = special_tokens
         self._vocab = self._build_vocab()
 
+def test_multiprocess(test_ids):
+    ids = test_ids[:]
+    shared_ids = multiprocessing.Array('i', ids, lock=False)
+    shared_diff = multiprocessing.Value('i', 0, lock=False)
+    processes = []
+    count = 12
+    total = len(ids)
+    interval = total // count
+    for i in range(count):
+        # Create a new process for each pair to replace
+        p = multiprocessing.Process(target=_merge_naive_worker, args=(shared_ids, shared_ids[i*interval:(i+1)*interval], (4, 5), 66, i*interval, (i+1)*interval, shared_diff))
+        processes.append(p)
+        p.start()
+        
+    # Ensure all processes complete
+    for p in processes:
+        p.join()
+
+    print(ids[:-shared_diff.value])
+
+def test_sequential(test_ids):
+    ids = test_ids[:]
+    freq = _pair_freq(ids)
+    
+    print(freq)
+    ids = _merge(freq, ids, (4, 5), 66)
+        
 
 if __name__ == "__main__":
-    VOCAB_SIZE = 1000
+    VOCAB_SIZE = 100000
     tokenizer = Tokenizer()
     tokenizer_training_data = ""
 
     
-    files = [file for file in os.listdir("data")]
+    
+    files = [file for file in os.listdir("site_data")]
     loader = tqdm(total=len(files), desc="Compiling training data")
+    index = 0
+    interval = 5
     for file in files:
-        with open(f"data/{file}") as g:
-            tokenizer_training_data += g.read()
-        g.close()
-        loader.update()
+        if index % interval == 0:
+            with open(f"site_data/{file}") as g:
+                tokenizer_training_data += g.read()
+            g.close()
+            loader.update()
+        index += 1
     loader.close()
 
-    tokenizer._build_mergeable_ranks(tokenizer_training_data)
+    
+    '''with open("data/threebody.txt") as f:
+        tokenizer_training_data = f.read()'''
+
+    
+    #time_a = benchmark(Tokenizer.train_naive, tokenizer, tokenizer_training_data, VOCAB_SIZE, number_of_samples=1)
+    '''VOCAB_SIZE = 500
+    tokenizer = Tokenizer()
+    time_b = benchmark(Tokenizer.train, tokenizer, tokenizer_training_data, VOCAB_SIZE, number_of_samples=1)
+    print(f"Time of Naive: {time_a}s")
+    print(f"Time of Improved: {time_b}s")
+    print(f"Speedup: {time_a/time_b}")
+    tokenizer.save("tokenizer_models/model2")'''
+
     tokenizer.train(tokenizer_training_data, VOCAB_SIZE)
-    e = tokenizer.encode("Hello, my name is Blake. What is your name?")
-    print(tokenizer._vocab)
-    pair = max(tokenizer._mergeable_ranks, key=lambda x: tokenizer._mergeable_ranks[(x[0], x[1])])
-    print(tokenizer._vocab[pair[0]], tokenizer._vocab[pair[1]])
+    tokenizer.save("tokenizer_models/model3")
 
-
-    '''try:
-        tokenizer.load("tokenizer_models/umb2M.model")
-    except FileNotFoundError:
-        try:
-            tokenizer.train(tokenizer_training_data, VOCAB_SIZE)
-        except KeyboardInterrupt:
-            print("Training interrupted. Saving model...")
-        tokenizer.save("tokenizer_models/umb2M")'''
 
 # This is the command to download the umb website
 # wget -m -k -K -E -l 7 -t 6 -w 5 https://www.umb.edu/
