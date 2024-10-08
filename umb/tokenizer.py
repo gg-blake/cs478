@@ -15,6 +15,7 @@ import time
 import numpy as np
 import os
 from benchmark import benchmark
+import json
 
 import math
 def clamp(value, min_value, max_value):
@@ -492,9 +493,38 @@ if __name__ == "__main__":
     print(f"Time of Improved: {time_b}s")
     print(f"Speedup: {time_a/time_b}")
     tokenizer.save("tokenizer_models/model2")'''
+    ratios = []
+    total = 0
+    tokenized_umb_text = {}
+    loader = tqdm(total=len(files), desc="Compiling training data")
+    if os.path.exists("encoded_umb_text.json"):
+        tokenized_umb_text = json.load(open("encoded_umb_text.json"))
+        loader.close()
+        print("Loaded encoded text")
+        exit()
+
+    for file in files:
+        tokenizer = Tokenizer()
+        with open(f"site_data/{file}") as f:
+            tokenizer_training_data = f.read()
+        text_a = tokenizer.encode(tokenizer_training_data)
+        tokenizer.load("tokenizer_models/umb100k.model")
+        text_b = tokenizer.encode(tokenizer_training_data)
+        tokenized_umb_text[file] = text_b
+        
+        length_diff = len(text_a) / len(text_b)
+        ratios.append(length_diff)
+        loader.update()
+        total += len(text_b)
+
+    json.dump(tokenized_umb_text, open("encoded_umb_text.json", "w"))
+
+    loader.close()
+    print(f"Average Ratio: {sum(ratios)/len(ratios)}x")
+    print(f"Total Tokens: {total}")
 
 
-    tokenizer.load("tokenizer_models/umb100k.model")
+    '''tokenizer.load("tokenizer_models/umb100k.model")
     test_data = ""
     with open(f"site_data/{files[29]}") as f:
         test_data = f.read()
@@ -502,6 +532,7 @@ if __name__ == "__main__":
     tokens = tokenizer.encode(test_data)
     strings = [tokenizer._vocab[token] for token in tokens]
     print(tokens, strings)
+    print(len(tokens))'''
 
     #tokenizer.train(tokenizer_training_data, VOCAB_SIZE)
     #tokenizer.save("tokenizer_models/model3")
