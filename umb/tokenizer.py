@@ -467,7 +467,7 @@ if __name__ == "__main__":
     
     
     files = [file for file in os.listdir("site_data")]
-    loader = tqdm(total=len(files), desc="Compiling training data")
+    '''loader = tqdm(total=len(files), desc="Compiling training data")
     index = 0
     interval = 5
     for file in files:
@@ -477,7 +477,7 @@ if __name__ == "__main__":
             g.close()
             loader.update()
         index += 1
-    loader.close()
+    loader.close()'''
 
     
     '''with open("data/threebody.txt") as f:
@@ -493,8 +493,18 @@ if __name__ == "__main__":
     print(f"Speedup: {time_a/time_b}")
     tokenizer.save("tokenizer_models/model2")'''
 
-    tokenizer.train(tokenizer_training_data, VOCAB_SIZE)
-    tokenizer.save("tokenizer_models/model3")
+
+    tokenizer.load("tokenizer_models/umb100k.model")
+    test_data = ""
+    with open(f"site_data/{files[29]}") as f:
+        test_data = f.read()
+
+    tokens = tokenizer.encode(test_data)
+    strings = [tokenizer._vocab[token] for token in tokens]
+    print(tokens, strings)
+
+    #tokenizer.train(tokenizer_training_data, VOCAB_SIZE)
+    #tokenizer.save("tokenizer_models/model3")
 
 
 # This is the command to download the umb website
