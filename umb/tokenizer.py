@@ -245,12 +245,7 @@ class Tokenizer:
 
     # Train the tokenizer on the given text
     # NOTE: This training method will also force prevent merges between different chunks of text. Chunks are formed by the regex pattern used by GPT-4
-    def train(self, text, vocab_size, verbose=False):
-        assert vocab_size >= 256
-
-        # Only add vocab_size number of symbols to the vocabulary
-        num_merges = vocab_size - len(self._vocab)
-
+    def train(self, text, verbose=False):
         # Split the text up into text chunks
         text_chunks = re.findall(self.compiled_pattern, text)
 
@@ -263,17 +258,25 @@ class Tokenizer:
         tmp_merges = self._merges.copy()
 
         print(f"Training on {len(ids)} chunks of text...")
-        loader = tqdm(total=vocab_size, desc="Training BPE", unit="merges")
+        
         #loader.update(n=len(tmp_vocab))
         index_i = 0
         # BPE: Iteratively merge the most common consecutive pairings of bytes
         self._mergeable_ranks = {}
         for chunk_ids in ids:
             self._mergeable_ranks = _pair_freq(chunk_ids, self._mergeable_ranks)
-        
-        while len(tmp_vocab) < vocab_size:
+
+        initial_max = max(self._mergeable_ranks.values())
+
+        loader = tqdm(total=initial_max, desc="Training BPE", unit="merges")
+        while initial_max > 1:
             # Store the most freq pair
             freq_pair = max(self._mergeable_ranks, key=lambda x: self._mergeable_ranks[(x[0], x[1])])
+            frequency = self._mergeable_ranks[freq_pair]
+            diff = initial_max - frequency
+            if diff > 0:
+                loader.update(diff)
+                initial_max = frequency
             idx = 256 + index_i
                 
             
@@ -306,7 +309,7 @@ class Tokenizer:
         data_size_untrained = len(data)
 
         # Run the trainer
-        self.train(training_text, 300)
+        self.train(training_text)
 
         # Record the new vocabulary and data sizes
         data = self.encode(encode_text)
