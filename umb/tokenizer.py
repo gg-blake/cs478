@@ -245,7 +245,7 @@ class Tokenizer:
 
     # Train the tokenizer on the given text
     # NOTE: This training method will also force prevent merges between different chunks of text. Chunks are formed by the regex pattern used by GPT-4
-    def train(self, text, verbose=False):
+    def train(self, text, vocab_size, verbose=False):
         # Split the text up into text chunks
         text_chunks = re.findall(self.compiled_pattern, text)
 
@@ -266,20 +266,15 @@ class Tokenizer:
         for chunk_ids in ids:
             self._mergeable_ranks = _pair_freq(chunk_ids, self._mergeable_ranks)
 
-        initial_max = max(self._mergeable_ranks.values())
-
-        loader = tqdm(total=initial_max, desc="Training BPE", unit="merges")
-        while initial_max > 1:
+        loader = tqdm(total=(vocab_size - 256), desc="Training BPE", unit="merges")
+        
+        while index_i < vocab_size - 256:
             # Store the most freq pair
             freq_pair = max(self._mergeable_ranks, key=lambda x: self._mergeable_ranks[(x[0], x[1])])
-            frequency = self._mergeable_ranks[freq_pair]
-            diff = initial_max - frequency
-            if diff > 0:
-                loader.update(diff)
-                initial_max = frequency
+            if self._mergeable_ranks[freq_pair] == 1:
+                break
+
             idx = 256 + index_i
-                
-            
             ids = [_merge(self._mergeable_ranks, chunk_ids, freq_pair, idx) for chunk_ids in ids]
             
             tmp_merges[freq_pair] = idx
@@ -289,8 +284,9 @@ class Tokenizer:
             '''if verbose:
                 print(f"merge {i+1}/{num_merges}: {freq_pair} -> {idx} ({tmp_vocab[idx]}) had {self._mergeable_ranks[freq_pair]} occurrences")'''
 
-            loader.update()
+            
             index_i += 1
+            loader.update()
 
         loader.close()
 
