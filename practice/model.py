@@ -1,30 +1,33 @@
+import sys
 import torch
 import torch.nn as nn
+import numpy as np
+from tqdm import tqdm
 from torch.nn import functional as F
 import tokenizer
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-batch_size = 4  # how many independent sequences will we process in parallel?
-max_iters = 2500
+batch_size = 32  # how many independent sequences will we process in parallel?
+max_iters = 10000
 eval_interval = 500
-learning_rate = 3e-1
+learning_rate = 1e-4
 eval_iters = 100
 block_size = 16  # what is the maximum context length for predictions?
-n_embd = 8
+n_embd = 16
 n_head = 4
 n_layer = 4
 dropout = 0.2
 
-with open('lice.txt', 'r', encoding='utf-8') as f:
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
     text = f.read()
-with open('input.txt', 'r', encoding='utf-8') as f:
-    training_text = f.read()
 
 
-vocab_size = 500
+vocab_size = int(sys.argv[3])
 tk = tokenizer.Tokenizer()
-tk.train(text, vocab_size, verbose=True)
+tk.load(sys.argv[2])
+#tk.train(text, vocab_size, verbose=True)
+
 
 data = torch.tensor(tk.encode(text), dtype=torch.long)
 
@@ -40,6 +43,7 @@ def get_batch(split):
     # print(ix)
     x = torch.stack([data[i:i + block_size] for i in ix])
     y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
+    x, y = x.to(device), y.to(device)
     return x, y
 
 
@@ -51,9 +55,11 @@ y = train_data[1:block_size + 1]
 for t in range(block_size):
     context = x[:t+1]
     target = y[t]
-    # print('when input is ', context, 'target is ', target)
 
-
+loss_history = {
+                'train': np.array([]),
+                'val': np.array([])
+                }
 @torch.no_grad()
 def estimate_loss():
     out = {}
@@ -65,10 +71,12 @@ def estimate_loss():
             logits, loss = m(X, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
+        loss_history[split] = np.append(loss_history[split], out[split])
     m.train()
     return out
 
 
+'''
 class LayerNorm1d:
 
     def __init__(self, dim, eps=1e-5):
@@ -87,6 +95,7 @@ class LayerNorm1d:
 
     def parameters(self):
         return [self.gamma, self.beta]
+'''
 
 
 class FeedForward(nn.Module):
@@ -171,10 +180,6 @@ class LanguageModel(nn.Module):
         self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_layer)])
         self.ln_f = nn.LayerNorm(n_embd) # final layer norm
         self.lm_head = nn.Linear(n_embd, vocab_size)
-        self.block_size = block_size
-
-    def get_block_size(self):
-        return self.block_size
 
     def forward(self, index, targets=None):
         B, T = index.shape
@@ -216,17 +221,26 @@ class LanguageModel(nn.Module):
 
 
 m = LanguageModel(vocab_size)
-m.load_state_dict(torch.load('weights.pth', weights_only=True))
+#m.load_state_dict(torch.load(sys.argv[4], weights_only=True))
+#m.eval()
+# PyTorch Optimizer
+optimizer = torch.optim.AdamW(m.parameters(), lr=learning_rate)
+
+iterations = 0
+
+# Loading model and optimizer
+checkpoint = torch.load(sys.argv[4], weights_only=False)
+m.load_state_dict(checkpoint['model_state_dict'])
+optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+iterations = checkpoint['iterations']
+loss_history = checkpoint['loss_history']
+
+m.to(device)
 m.eval()
 
 
 
-
-
-# PyTorch Optimizer
-optimizer = torch.optim.AdamW(m.parameters(), lr=learning_rate)
-
-for iter in range(max_iters):
+for iter in tqdm(range(max_iters), ascii=True, desc='Iterations'):
     # every once in a while evaluate the loss on train and val sets
     if iter % eval_interval == 0:
         losses = estimate_loss()
@@ -236,13 +250,29 @@ for iter in range(max_iters):
 
     # evaluate the loss
     logits, loss = m.forward(xb, yb)
+
+    # zeros out the gradients
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
+
+    # adjusts learning_rate
     optimizer.step()
 
 print(loss.item())
 
+
+iterations += max_iters
+data_output = np.array(list(zip(np.arange(0, iterations, eval_interval), loss_history['train'], loss_history['val'])))
+np.save("data_output", data_output)
+
+torch.save({
+    'model_state_dict': m.state_dict(),
+    'optimizer_state_dict': optimizer.state_dict(),
+    'iterations': iterations,
+    'loss_history': loss_history
+    }, sys.argv[4])
+
+
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
-generated_chars = tk.decode(m.generate(context, max_new_tokens=500)[0].tolist())
+generated_chars = tk.decode(m.generate(context, max_new_tokens=100)[0].tolist())
 print(generated_chars)
-torch.save(m.state_dict(), 'weights.pth')
