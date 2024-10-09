@@ -154,7 +154,6 @@ def _merge(freq, text_bytes, pair, replacement_id):
     return result
 
 def merge_chunk(freq, text_bytes, pairs, replacement_id):
-    
     manager = multiprocessing.Manager()
     shared_ids = multiprocessing.Array('i', text_bytes, lock=False)
     shared_freq = manager.dict(freq)
@@ -170,11 +169,60 @@ def merge_chunk(freq, text_bytes, pairs, replacement_id):
     for p in processes:
         p.join()
     
-    
     return shared_ids[:]
 
 class Tokenizer:
+    """
+    A class used to convert text to numbers (tokens)
+
+    Attributes
+    ----------
+    pattern : str
+        a regular expression to chunk text input into more logical segments
+    compiled_pattern : Pattern[str]
+        a compiled regular expression pattern from the given regular expression string
+    _merges : dict[tuple[int, int], int]
+        a mapping of token pairs to their symbolic token representation
+    _special_tokens : dict[int, str]
+        a mapping of tokens to special text characters (end of line, new line, etc.)
+    _vocab : dict[int, str]
+        a mapping of tokens to utf-8 text
+    _mergeable_ranks : dict[tuple[int, int], int]
+        a mapping of token pairs to their current frequency in the merged training data
+
+    Methods
+    -------
+    _build_vocab()
+        Returns the initial mapping of tokens to utf-8 text after starting with 256-character
+        and applying the initial merges and adding special tokens to the vocabulary
+    train_naive(text, vocab_size, verbose=False)
+        Updates the tokenizer vocabulary based on the given text;
+        performs Byte-Pair Encoding (BPE) on the text and iteratively merges the most common pairings 
+        of tokens. Calculates the most frequent pair every iteration in linear time.
+    train(text, vocab_size, verbose=False)
+        Updates the tokenizer vocabulary based on the given text;
+        performs Byte-Pair Encoding (BPE) on the text and iteratively merges the most common pairings 
+        of tokens. Calculates the most frequent pair every iteration in constant time.
+    _encode_chunk(text_bytes)
+        Helper function for the encode() method: Returns a list of tokens (integers) encoded from the given raw bytes
+    encode(text)
+        Returns a list of tokens given an input string
+    decode(ids)
+        Returns a string representation of a given list of tokens
+    save(file_prefix)
+        Saves the instance's vocabulary and merge history to a text file ending in .model with the given file prefix
+    load(model_file)
+        Loads the vocabulary and merge history from a text file given a string; 
+        model_file must include file suffix .model
+    """
+  
     def __init__(self, pattern=None):
+        """
+        Parameters
+        ----------
+        pattern : str
+            The regular expression for chunking the model training data (default is None)
+        """
         self.pattern = GPT4_SPLIT_PATTERN if pattern is None else pattern
         self.compiled_pattern = re.compile(self.pattern)
         self._merges = {}
@@ -182,8 +230,10 @@ class Tokenizer:
         self._vocab = self._build_vocab()
         self._mergeable_ranks = {}
     
-    # Helper method to initialize an instance's vocabulary
     def _build_vocab(self):
+        """Returns the initial mapping of tokens to utf-8 text after starting with 256-character
+        and applying the initial merges and adding special tokens to the vocabulary
+        """
         vocab = {idx: bytes([idx]) for idx in range(256)}
         for (p0, p1), idx in self._merges.items():
             vocab[idx] = vocab[p0] + vocab[p1]
@@ -191,10 +241,24 @@ class Tokenizer:
             vocab[idx] = special.encode("utf-8")
         return vocab
 
-
-    # Train the tokenizer on the given text
-    # NOTE: This training method will also force prevent merges between different chunks of text. Chunks are formed by the regex pattern used by GPT-4
     def train_naive(self, text, vocab_size, verbose=False):
+        """Updates the tokenizer vocabulary based on the given text;
+        performs Byte-Pair Encoding (BPE) on the text and iteratively merges the most common pairings 
+        of tokens. Calculates the most frequent pair every iteration in linear time.
+
+        NOTE: This training method will also force prevent merges between different chunks of text. Chunks are formed by the regex pattern used by GPT-4
+
+        Time Complexity: O(3mn) where m is the length of the text and n is the number of compression iterations
+
+        Parameters
+        ----------
+        text : str
+            The text to train the tokenizer
+        vocab_size : int
+            The number of iterations to perform a merging of the most frequent pair
+        verbose : bool, optional
+            When enabled, will print the result of every merging of a common pair, including its frequency and its new token replacement
+        """
         assert vocab_size >= 256
 
         # Only add vocab_size number of symbols to the vocabulary
@@ -243,9 +307,24 @@ class Tokenizer:
         self._merges = tmp_merges # used in encode()
         self._vocab = tmp_vocab   # used in decode()
 
-    # Train the tokenizer on the given text
-    # NOTE: This training method will also force prevent merges between different chunks of text. Chunks are formed by the regex pattern used by GPT-4
     def train(self, text, vocab_size, verbose=False):
+        """Updates the tokenizer vocabulary based on the given text;
+        performs Byte-Pair Encoding (BPE) on the text and iteratively merges the most common pairings 
+        of tokens. Calculates the most frequent pair every iteration in constant time.
+
+        NOTE: This training method will also force prevent merges between different chunks of text. Chunks are formed by the regex pattern used by GPT-4
+
+        Time Complexity: O(2mn) where m is the length of the text and n is the number of compression iterations
+
+        Parameters
+        ----------
+        text : str
+            The text to train the tokenizer
+        vocab_size : int
+            The number of iterations to perform a merging of the most frequent pair
+        verbose : bool, optional
+            When enabled, will print the result of every merging of a common pair, including its frequency and its new token replacement
+        """
         # Split the text up into text chunks
         text_chunks = re.findall(self.compiled_pattern, text)
 
@@ -294,9 +373,6 @@ class Tokenizer:
         self._merges = tmp_merges # used in encode()
         self._vocab = tmp_vocab   # used in decode()
 
-
-
-    # Prints the stats of a call to train()
     def train_stats(self, training_text, encode_text, vocab_size):
         # Reecord the old vocabulary and data sizes
         data = self.encode(encode_text)
@@ -316,8 +392,14 @@ class Tokenizer:
         # Print the stats
         print(f"Untrained Vocab Size: {data_vocab_size_untrained}\nUntrained Data Size: {data_size_untrained}\nTrained Vocab Size: {data_vocab_size_trained}\nTrained Data Size: {data_size_trained}\nRatio: {data_size_untrained/data_size_trained}")
 
-    # Helper function for the encode() method: Returns a list of tokens (integers) encoded from the given raw bytes
     def _encode_chunk(self, text_bytes):
+        """Helper function for the encode() method: Returns a list of tokens (integers) encoded from the given raw bytes
+        
+        Parameters
+        ----------
+        text_bytes : bytes
+            utf-8 bytes to be encoded to tokens
+        """
         ids = list(text_bytes)
         while len(ids) >= 2:
             freq = _pair_freq(ids)
@@ -330,8 +412,14 @@ class Tokenizer:
 
         return ids
     
-    # Returns a list of tokens encoded, using its vocabulary, of a given text (string)
     def encode(self, text):
+        """Returns a list of tokens given an input string
+
+        Parameters
+        ----------
+        text : str
+            Plain text that is to be converted to a list of tokens
+        """
         # Split text into chunks of text with a given regex pattern (In this case its the GPT-4 pattern)
         text_chunks = re.findall(self.compiled_pattern, text)
         # Encode chunks of text separately, then rejoin and return the result
@@ -345,28 +433,29 @@ class Tokenizer:
 
         return ids
 
-    # Returns a text representation (string) of the given sequence of tokens
     def decode(self, ids):
+        """Returns a string representation of a given list of tokens
+
+        Parameters
+        ----------
+        ids : list[int]
+            A sequence of tokens to be converted to text
+        """
         tokens = b"".join(self._vocab[i] for i in ids)
         text = tokens.decode("utf-8", errors="replace")
         return text
     
-    
-    
-        
-            
-        
-        
-
-
-    
-    
     def save(self, file_prefix):
-        """
+        """Saves the instance's vocabulary and merge history to a text file ending in .model with the given file prefix
+        
         Saves two files: file_prefix.vocab and file_prefix.model
         This is inspired (but not equivalent to!) sentencepiece's model saving:
         - model file is the critical one, intended for load()
         - vocab file is just a pretty printed version for human inspection only
+
+        Parameters:
+        file_prefix : str
+            The intended file name excluding the .model suffix
         """
         # write the model: to be used in load() later
         model_file = file_prefix + ".model"
@@ -405,7 +494,16 @@ class Tokenizer:
                     f.write(f"[{s}] {idx}\n")
 
     def load(self, model_file):
-        """Inverse of save() but only for the model file"""
+        """Loads the vocabulary and merge history from a text file given a string; 
+        model_file must include file suffix .model
+
+        Inverse of save() but only for the model file
+
+        Parameters
+        ----------
+        model_file : str
+            The desired file's file name to be loaded 
+        """
         assert model_file.endswith(".model")
         # read the model file
         merges = {}
@@ -430,112 +528,6 @@ class Tokenizer:
         self._merges = merges
         self._special_tokens = special_tokens
         self._vocab = self._build_vocab()
-
-def test_multiprocess(test_ids):
-    ids = test_ids[:]
-    shared_ids = multiprocessing.Array('i', ids, lock=False)
-    shared_diff = multiprocessing.Value('i', 0, lock=False)
-    processes = []
-    count = 12
-    total = len(ids)
-    interval = total // count
-    for i in range(count):
-        # Create a new process for each pair to replace
-        p = multiprocessing.Process(target=_merge_naive_worker, args=(shared_ids, shared_ids[i*interval:(i+1)*interval], (4, 5), 66, i*interval, (i+1)*interval, shared_diff))
-        processes.append(p)
-        p.start()
-        
-    # Ensure all processes complete
-    for p in processes:
-        p.join()
-
-    print(ids[:-shared_diff.value])
-
-def test_sequential(test_ids):
-    ids = test_ids[:]
-    freq = _pair_freq(ids)
-    
-    print(freq)
-    ids = _merge(freq, ids, (4, 5), 66)
-        
-
-if __name__ == "__main__":
-    VOCAB_SIZE = 100000
-    tokenizer = Tokenizer()
-    tokenizer_training_data = ""
-
-    
-    
-    files = [file for file in os.listdir("site_data")]
-    '''loader = tqdm(total=len(files), desc="Compiling training data")
-    index = 0
-    interval = 5
-    for file in files:
-        if index % interval == 0:
-            with open(f"site_data/{file}") as g:
-                tokenizer_training_data += g.read()
-            g.close()
-            loader.update()
-        index += 1
-    loader.close()'''
-
-    
-    '''with open("data/threebody.txt") as f:
-        tokenizer_training_data = f.read()'''
-
-    
-    #time_a = benchmark(Tokenizer.train_naive, tokenizer, tokenizer_training_data, VOCAB_SIZE, number_of_samples=1)
-    '''VOCAB_SIZE = 500
-    tokenizer = Tokenizer()
-    time_b = benchmark(Tokenizer.train, tokenizer, tokenizer_training_data, VOCAB_SIZE, number_of_samples=1)
-    print(f"Time of Naive: {time_a}s")
-    print(f"Time of Improved: {time_b}s")
-    print(f"Speedup: {time_a/time_b}")
-    tokenizer.save("tokenizer_models/model2")'''
-    ratios = []
-    total = 0
-    tokenized_umb_text = {}
-    loader = tqdm(total=len(files), desc="Compiling training data")
-    if os.path.exists("encoded_umb_text.json"):
-        tokenized_umb_text = json.load(open("encoded_umb_text.json"))
-        loader.close()
-        print("Loaded encoded text")
-        exit()
-
-    for file in files:
-        tokenizer = Tokenizer()
-        with open(f"site_data/{file}") as f:
-            tokenizer_training_data = f.read()
-        text_a = tokenizer.encode(tokenizer_training_data)
-        tokenizer.load("tokenizer_models/umb100k.model")
-        text_b = tokenizer.encode(tokenizer_training_data)
-        tokenized_umb_text[file] = text_b
-        
-        length_diff = len(text_a) / len(text_b)
-        ratios.append(length_diff)
-        loader.update()
-        total += len(text_b)
-
-    json.dump(tokenized_umb_text, open("encoded_umb_text.json", "w"))
-
-    loader.close()
-    print(f"Average Ratio: {sum(ratios)/len(ratios)}x")
-    print(f"Total Tokens: {total}")
-
-
-    '''tokenizer.load("tokenizer_models/umb100k.model")
-    test_data = ""
-    with open(f"site_data/{files[29]}") as f:
-        test_data = f.read()
-
-    tokens = tokenizer.encode(test_data)
-    strings = [tokenizer._vocab[token] for token in tokens]
-    print(tokens, strings)
-    print(len(tokens))'''
-
-    #tokenizer.train(tokenizer_training_data, VOCAB_SIZE)
-    #tokenizer.save("tokenizer_models/model3")
-
 
 # This is the command to download the umb website
 # wget -m -k -K -E -l 7 -t 6 -w 5 https://www.umb.edu/
