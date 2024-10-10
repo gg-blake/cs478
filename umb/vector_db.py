@@ -2,7 +2,6 @@ from tokenizer import Tokenizer
 import numpy as np
 import os
 import torch
-from graphviz import Graph
 import networkx as nx
 import torch.nn.functional as F
 from torch import nn
