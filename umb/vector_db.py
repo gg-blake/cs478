@@ -22,7 +22,7 @@ def cross_entropy(y0, x, e):
         
 
 class AttentionHead(nn.Module):
-    def __init__(self, head_size, embed_size):
+    def __init__(self, embed_size, head_size):
         super().__init__()
         self.embed_size = embed_size
         self.query_weights = nn.Linear(embed_size, head_size, bias=False, device=device)
@@ -46,14 +46,42 @@ class AttentionHead(nn.Module):
         # We don't apply the embeddings directly to wei but instead we apply another backpropagatable linear layer to the embeddings (called value) and then apply wei
         value = self.value_weights(embeddings)
         return wei @ value
-        
+    
+class MultiheadedAttention(nn.Module):
+    def __init__(self, embed_size, head_size, head_count):
+        super().__init__()
+        self.heads = nn.ModuleList([AttentionHead(embed_size, head_size) for _ in range(head_count)])
+
+    def forward(self, x):
+        return torch.cat([head(x) for head in self.heads], dim=-1)
+    
+class TransformerBlock(nn.Module):
+    def __init__(self, embed_size, head_size, head_count):
+        super().__init__()
+        self.head = nn.ModuleList([AttentionHead(embed_size, head_size) for _ in range(head_count)])
+        self.ffwd = nn.Sequential(
+            nn.Linear(embed_size, embed_size, device=device),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        out = self.head_forward(x)
+        out = self.linear_forward(out)
+        return out
+
+    def head_forward(self, x):
+        return torch.cat([head(x) for head in self.heads], dim=-1)
+    
+    def linear_forward(self, x):
+        return self.ffwd(x)
 
 class LanguageModel(nn.Module):
-    def __init__(self, vocab_size, embedding_size, block_size):
+    def __init__(self, vocab_size, embedding_size, block_size, head_count):
         super().__init__()
+        self.block_size = block_size
         self.token_embeddings = nn.Embedding(vocab_size, embedding_size, device=device)
         self.positional_embeddings = nn.Embedding(block_size, embedding_size, device=device)
-        self.attention_head = AttentionHead(embedding_size, embedding_size)
+        self.block = TransformerBlock(embedding_size, embedding_size//head_count, head_count)
         self.lm_head = nn.Linear(embedding_size, vocab_size, bias=False, device=device)
 
     def forward(self, idx, targets=None):
@@ -61,20 +89,28 @@ class LanguageModel(nn.Module):
         token_idx = self.token_embeddings(idx)
         positional_idx = self.positional_embeddings(torch.arange(T, device=device))
         
-        positioned_token_embedding = token_idx + positional_idx
-        attended_logits = self.attention_head(positioned_token_embedding)
-        logits = self.lm_head(attended_logits)
+        logits = token_idx + positional_idx
+        logits = self.block(logits)
+        logits = self.lm_head(logits)
         if targets is not None:
             B, T, C = logits.shape
             logits = logits.view(B*T, C)
             targets = targets.view(B*T)
             loss = F.cross_entropy(logits, targets)
+        else:
+            loss = None
 
         return logits, loss
     
-    def generate(self, idx, max):
-        for _ in range(max):
-            pass
+    def generate(self, idx, max_new_tokens):
+        for _ in range(max_new_tokens):
+            idx_cond = idx[:, -self.block_size:]
+            logits, loss = self(idx_cond)
+            logits = logits[:, -1, :]
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat((idx, idx_next), dim=1)
+        return idx
 
 
 def sample(data, batch_size, block_size):
@@ -95,18 +131,17 @@ if __name__ == "__main__":
     tokenizer.load("tokenizer_models/umb100k-1.model")
     vocab_size = len(tokenizer._vocab)
 
-    lm = LanguageModel(vocab_size, 32, 8)
+    lm = LanguageModel(vocab_size, 32, 8, 4)
     
     optimizer = adamw.AdamW(lm.parameters(), lr=1e-3)
-    for epoch in range(100):
+    for epoch in range(1000):
         optimizer.zero_grad()
         logits, loss = lm(s, t)
         loss.backward()
         optimizer.step()
         print(loss.item())
 
-    torch.save(lm.state_dict(), "umb100k-1.model")
-    print("Model saved")
+    
 
     
     
