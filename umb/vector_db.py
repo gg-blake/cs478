@@ -7,29 +7,27 @@ import torch.nn.functional as F
 from torch import nn
 import json
 from torch.optim import adamw
+import tiktoken
+from math import floor
+from tqdm import tqdm
+
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def cross_entropy(y0, x, e):
-    loss = 0.
-    n_batch, n_class = y0.shape
-    # print(n_class)
-    for y1, x1 in zip(y0, x):
-        class_index = int(x1.item())
-        loss = loss + torch.log(torch.exp(y1[class_index])/(torch.exp(y1).sum()))
-    loss = - loss/n_batch
-    return loss
-        
+
 
 class AttentionHead(nn.Module):
-    def __init__(self, embed_size, head_size):
+    def __init__(self, embed_size, head_size, block_size, dropout):
         super().__init__()
         self.embed_size = embed_size
         self.query_weights = nn.Linear(embed_size, head_size, bias=False, device=device)
         self.key_weights = nn.Linear(embed_size, head_size, bias=False, device=device)
         self.value_weights = nn.Linear(embed_size, head_size, bias=False, device=device)
+        self.dropout = nn.Dropout(dropout)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size, device=device)))
 
     def forward(self, embeddings):
+        B, T, C = embeddings.shape
         # Queries store the information of what other embeddings have in a particular block
         query = self.query_weights(embeddings)
         # Keys store the information that a particular embedding has relative to other embeddings in a block
@@ -39,49 +37,73 @@ class AttentionHead(nn.Module):
         wei = query @ key.transpose(-2, -1) * self.embed_size**-0.5 
         # When training a model, we don't want embeddings that are ahead of an embedding in a block to send information to it (its like cheating in a test)
         # So we will apply a mask to wei
-        tril = torch.tril(torch.ones(embeddings.shape[1], embeddings.shape[1], device=device))
-        wei = wei.masked_fill(tril == 0, float('-inf'))
+        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
         # Then we apply a softmax to make the output on interval [0,1)
         wei = torch.softmax(wei, dim=-1)
         # We don't apply the embeddings directly to wei but instead we apply another backpropagatable linear layer to the embeddings (called value) and then apply wei
         value = self.value_weights(embeddings)
         return wei @ value
     
-class MultiheadedAttention(nn.Module):
-    def __init__(self, embed_size, head_size, head_count):
-        super().__init__()
-        self.heads = nn.ModuleList([AttentionHead(embed_size, head_size) for _ in range(head_count)])
-
-    def forward(self, x):
-        return torch.cat([head(x) for head in self.heads], dim=-1)
-    
 class TransformerBlock(nn.Module):
-    def __init__(self, embed_size, head_size, head_count):
+    def __init__(self, embed_size, head_size, head_count, block_size, dropout):
         super().__init__()
-        self.head = nn.ModuleList([AttentionHead(embed_size, head_size) for _ in range(head_count)])
+        # Multiheaded attention (batched attention calculation)
+        self.heads = nn.ModuleList([AttentionHead(embed_size, head_size // head_count, block_size, dropout) for _ in range(head_count)])
+        # Linear projection of outcome of multiheaded attention layer
+        self.proj = nn.Linear(embed_size, embed_size, device=device)
+        # Randomly zeros out some of the data to prevent overfitting in training
+        self.dropout = nn.Dropout(dropout)
+        # Simple multilayered perceptron
         self.ffwd = nn.Sequential(
-            nn.Linear(embed_size, embed_size, device=device),
-            nn.ReLU()
+            nn.Linear(embed_size, 4 * embed_size, device=device),
+            nn.ReLU(),
+            nn.Linear(4 * embed_size, embed_size, device=device),
+            self.dropout
         )
+        self.layer_norm1 = nn.LayerNorm(embed_size, device=device)
+        self.layer_norm2 = nn.LayerNorm(embed_size, device=device)
 
     def forward(self, x):
-        out = self.head_forward(x)
-        out = self.linear_forward(out)
-        return out
+        # We want to ensure that our nodes across each batch dimension have mean = 0 and standard deviation = 0 before feeding to the multiheaded attention layer
+        # So we want to apply whats called layer normalization
+        # Here is the pytorch documentation: https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html (LayerNorm)
+        layer_norm = self.layer_norm1(x)
+        # Both the multiheaded attention layer and feed forward layer add the in features of the layer to the out features
+        # This is what is referred to as residual connections, and it solves an issue where increasingly deep networks become hard to train/optimize
+        # The paper discussing the benefits of this can be found here: https://arxiv.org/abs/1512.03385 (Deep Residual Learning for Image Recognition)
+        x = x + self.head_forward(layer_norm)
+        # We also want to apply layer normalization to our attention output before passing it to the feed forward layer
+        # In the original Attention is All You Need paper, layer normalization comes after each layer, but better results come from doing pre-layer normalization
+        layer_norm = self.layer_norm2(x)
+        # Once all the nodes in the head have their individual attention scores, we need to train the nodes to compute their attention scores individually
+        # This is why we feed the data into a multilayered perceptron, which will allow the model to recognize patterns in the data
+        x = x + self.linear_forward(layer_norm)
+        return x
 
     def head_forward(self, x):
-        return torch.cat([head(x) for head in self.heads], dim=-1)
+        out = torch.cat([head(x) for head in self.heads], dim=-1)
+        # We want to recombine the outcomes together so we must project it to a layer of the right dimensions 
+        # (head_count x embed_size x [embed_size // head_count]) -> (embed_size x embed_size)
+        out = self.dropout(out)
+        out = self.proj(out)
+        return out
     
     def linear_forward(self, x):
         return self.ffwd(x)
+    
+    
 
 class LanguageModel(nn.Module):
-    def __init__(self, vocab_size, embedding_size, block_size, head_count):
+    def __init__(self, vocab_size, embedding_size, batch_size, block_size, learning_rate, steps, head_count, layer_count, dropout):
         super().__init__()
+        self.batch_size = batch_size
         self.block_size = block_size
+        self.learning_rate = learning_rate
+        self.steps = steps
         self.token_embeddings = nn.Embedding(vocab_size, embedding_size, device=device)
         self.positional_embeddings = nn.Embedding(block_size, embedding_size, device=device)
-        self.block = TransformerBlock(embedding_size, embedding_size//head_count, head_count)
+        self.blocks = nn.Sequential(*[TransformerBlock(embedding_size, embedding_size, head_count, block_size, dropout) for _ in range(layer_count)])
+        self.layer_norm = nn.LayerNorm(embedding_size, device=device)
         self.lm_head = nn.Linear(embedding_size, vocab_size, bias=False, device=device)
 
     def forward(self, idx, targets=None):
@@ -90,7 +112,7 @@ class LanguageModel(nn.Module):
         positional_idx = self.positional_embeddings(torch.arange(T, device=device))
         
         logits = token_idx + positional_idx
-        logits = self.block(logits)
+        logits = self.blocks(logits)
         logits = self.lm_head(logits)
         if targets is not None:
             B, T, C = logits.shape
@@ -111,6 +133,38 @@ class LanguageModel(nn.Module):
             idx_next = torch.multinomial(probs, num_samples=1)
             idx = torch.cat((idx, idx_next), dim=1)
         return idx
+    
+    def train_model(self, tokens, eval_iters=200, training_val_ratio=0.8, loss_report_interval=500):
+        training_tokens = tokens[:floor(len(tokens)*training_val_ratio)]
+        validation_tokens = tokens[floor(len(tokens)*training_val_ratio):]
+        optimizer = adamw.AdamW(self.parameters(), lr=self.learning_rate)
+        for step in tqdm(range(self.steps)):
+            optimizer.zero_grad()
+            s, t = sample(training_tokens, 4, 8)
+            logits, loss = lm(s, t)
+            loss.backward()
+            optimizer.step()
+            if step % loss_report_interval == 0:
+                losses = self.estimate_loss(eval_iters, training_tokens, validation_tokens)
+                print(f"step {step}: train loss {losses[0]:.4f}, val loss {losses[1]:.4f}")
+                
+                #print(f"step {step}: train loss {loss:.4f}, val loss {loss:.4f}")
+
+    @torch.no_grad()
+    def estimate_loss(self, eval_iters, training_data, validation_data):
+        out = {}
+        # Disable dropout and layer normalization before model validation
+        self.eval()
+        for i, split in enumerate([training_data, validation_data]):
+            losses = torch.zeros(eval_iters)
+            for k in range(eval_iters):
+                X, Y = sample(split, self.batch_size, self.block_size)
+                logits, loss = self(X, Y)
+                losses[k] = loss.item()
+            out[i] = losses.mean()
+        # Enable dropout and layer normalization after model validation
+        self.train()
+        return out
 
 
 def sample(data, batch_size, block_size):
@@ -119,27 +173,66 @@ def sample(data, batch_size, block_size):
     target = torch.stack([data[start_idx+1:start_idx+block_size+1] for start_idx in starting_indices])
     return sample, target
 
+def useTiktoken(filename):
+    tokenizer = tiktoken.get_encoding("o200k_base")
+    assert tokenizer.decode(tokenizer.encode("hello world")) == "hello world"
+    with open(filename) as f:
+        tokens = torch.tensor(tokenizer.encode(f.read()), dtype=torch.long, device=device)
+
+    return tokenizer, tokens, tokenizer.n_vocab
+
+def useLocal(filename):
+    tokenizer = Tokenizer()
+    tokenizer.load("tokenizer_models/umb100k-1.model")
+    assert tokenizer.decode(tokenizer.encode("hello world")) == "hello world"
+    with open(filename) as f:
+        tokens = torch.tensor(tokenizer.encode(f.read()), dtype=torch.long, device=device)
+
+    return tokenizer, tokens, len(tokenizer._vocab)
+
     
 if __name__ == "__main__":
     tokens = []
-    with open("encoded_data/umb100k-1.json") as f:
-        tokens = torch.tensor(json.load(f)["www.umb.edu-health-services-counseling-center-index.txt"], dtype=torch.long, device=device)
+    '''with open("encoded_data/umb100k-1.json") as f:
+        tokens = torch.tensor(json.load(f)["www.umb.edu-health-services-counseling-center-index.txt"], dtype=torch.long, device=device)'''
 
-    s, t = sample(tokens, 4, 8)
-
-    tokenizer = Tokenizer()
-    tokenizer.load("tokenizer_models/umb100k-1.model")
-    vocab_size = len(tokenizer._vocab)
-
-    lm = LanguageModel(vocab_size, 32, 8, 4)
+    tokenizer, tokens, vocab_size = useTiktoken("data/threebody.txt")
     
-    optimizer = adamw.AdamW(lm.parameters(), lr=1e-3)
-    for epoch in range(1000):
+    '''tokenizer.load("tokenizer_models/umb100k-1.model")
+    vocab_size = len(tokenizer._vocab)'''
+    
+
+    lm = LanguageModel(
+        vocab_size=vocab_size, 
+        embedding_size=32,
+        batch_size=16, 
+        block_size=256,
+        learning_rate=3e-4,
+        steps=3000, 
+        head_count=4, 
+        layer_count=3,
+        dropout=0.2
+        )
+    
+
+    lm.train_model(tokens)
+    start_idx, _ = sample(tokens, lm.batch_size, lm.block_size)
+    outputs = lm.generate(start_idx, max_new_tokens=400)[0].tolist()
+    print(f"Prompt:\n{tokenizer.decode(start_idx[0].tolist())}\nGenerated Response:\n{tokenizer.decode(outputs)}")
+    
+    
+    '''optimizer = adamw.AdamW(lm.parameters(), lr=1e-3)
+    training_val_ratio = 0.7
+    training_tokens = tokens[:floor(len(tokens)*training_val_ratio)]
+    validation_tokens = tokens[floor(len(tokens)*training_val_ratio):]
+    for epoch in range(2000):
         optimizer.zero_grad()
+        s, t = sample(tokens, 4, 8)
         logits, loss = lm(s, t)
         loss.backward()
         optimizer.step()
-        print(loss.item())
+        if epoch % 500 == 0:
+            print(f"Epoch {epoch} Loss: {loss}")'''
 
     
 
