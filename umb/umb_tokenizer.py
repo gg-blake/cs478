@@ -1,4 +1,4 @@
-from tokenizer import Tokenizer
+from gpt.tokenizer import Tokenizer
 import os
 from tqdm import tqdm
 import json
