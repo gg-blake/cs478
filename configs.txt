@@ -1,0 +1,5 @@
+Training On Chimera [Data: threebody.txt, Model: tb384_1]:
+python lm_model.py -t tiktoken -m o200k_base -l models/threebody/tb384_1.pth -d data/threebody.txt 384 32 128 3e-4 5000 6 6 0.2
+
+Generating Text On Chimera [Data: threebody.txt, Model: tb384_1]:
+python lm_model.py -t tiktoken -m o200k_base -l models/threebody/tb384_1.pth -s no_save -d data/threebody.txt 384 32 128 3e-4 5000 6 6 0.2 --no_train True
