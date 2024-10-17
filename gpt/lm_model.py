@@ -369,7 +369,7 @@ class LanguageModel(nn.Module):
         self.train()
         return out
 
-
+# python lm_model.py -t tiktoken -m o200k_base -s models/threebody/200k_base -d data/threebody.txt 384 64 256 3e-4 5000 6 6 0.2
 def sample(data, batch_size, block_size):
     starting_indices = torch.randint(len(data) - block_size, (batch_size,))
     sample = torch.stack([data[start_idx:start_idx+block_size] for start_idx in starting_indices])
@@ -403,7 +403,7 @@ if __name__ == "__main__":
     parser.add_argument('-s', '--save_model', type=str, default="default", help='Specify the model to save the model to [model_path] (default: same as load_model path, no_save: do not save model)')
     parser.add_argument('-d', '--data', type=str, default="data/threebody.txt", help='Specify the data to use for training (default: data/threebody.txt)')
     parser.add_argument('--no_train', type=bool, default=False, help='Do not train the model')
-    parser.add_argument('params', nargs='*', default=[4, 8, 8, 1e-3, 5000, 4, 3, 0.1], help='Training parameters for the model [batch_size, block_size, embedding_size, learning_rate, steps, head_count, layer_count, dropout]\n(default: [4, 8, 8, 1e-3, 5000, 4, 3, 0.1])')
+    parser.add_argument('params', nargs='*', default=[8, 4, 8, 1e-3, 5000, 4, 3, 0.1], help='Training parameters for the model [embedding_size, batch_size, block_size, learning_rate, steps, head_count, layer_count, dropout]\n(default: [4, 8, 8, 1e-3, 5000, 4, 3, 0.1])')
     # python 
     args=parser.parse_args()
     print(args)
@@ -417,14 +417,14 @@ if __name__ == "__main__":
 
     lm = LanguageModel(
         vocab_size=vocab_size,
-        embedding_size=args.params[0],
-        batch_size=args.params[1],
-        block_size=args.params[2],
-        learning_rate=args.params[3],
-        steps=args.params[4],
-        head_count=args.params[5],
-        layer_count=args.params[6],
-        dropout=args.params[7]
+        embedding_size=int(args.params[0]),
+        batch_size=int(args.params[1]),
+        block_size=int(args.params[2]),
+        learning_rate=float(args.params[3]),
+        steps=int(args.params[4]),
+        head_count=int(args.params[5]),
+        layer_count=int(args.params[6]),
+        dropout=float(args.params[7])
     )
 
     if args.load_model != "untrained":
