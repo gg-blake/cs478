@@ -1,0 +1,16 @@
+# Model config
+EMBEDDING_SIZE=8
+BATCH_SIZE=4
+BLOCK_SIZE=8
+STEPS=5000
+LEARNING_RATE=0.0001
+HEAD_COUNT=4
+LAYER_COUNT=3
+DROPOUT=0.2
+
+# Tokenizer Config
+TOKENIZER_NAME="tiktoken"
+TOKENIZER_MODEL="o200k_base"
+
+# Data Config
+TRAIN_DATA_PATH="data/threebody.txt"

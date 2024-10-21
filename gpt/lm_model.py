@@ -14,6 +14,19 @@ from math import floor
 from tqdm import tqdm
 import argparse
 import optparse
+from .lm_config import *
+
+# Load the default model configuration
+LM_MODEL_CONFIG = [
+    EMBEDDING_SIZE,
+    BATCH_SIZE,
+    BLOCK_SIZE,
+    LEARNING_RATE,
+    STEPS,
+    HEAD_COUNT,
+    LAYER_COUNT,
+    DROPOUT
+]
 
 # Set the device to use for training
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -404,13 +417,13 @@ def useLocal(filename, model_name="tokenizer_models/umb100k-1.model"):
 if __name__ == "__main__":
     parser=argparse.ArgumentParser(
         description="""Train a language model on a dataset and generate text""")
-    parser.add_argument('-t', '--tokenizer', type=str, default="tokenizer", help='Specify the tokenizer to use (default: tokenizer)')
-    parser.add_argument('-m', '--tokenizer_model', type=str, default="tokenizer_models/umb100k-1.model", help='Specify the tokenizer model to use (default: tokenizer_models/umb100k-1.model)')
+    parser.add_argument('-t', '--tokenizer', type=str, default=TOKENIZER_NAME, help=f'Specify the tokenizer to use (default: {TOKENIZER_NAME})')
+    parser.add_argument('-m', '--tokenizer_model', type=str, default=TOKENIZER_MODEL, help=f'Specify the tokenizer model to use (default: {TOKENIZER_MODEL})')
     parser.add_argument('-l', '--load_model', type=str, default="untrained", help='Specify the model to use [model_path] (default: untrained)')
     parser.add_argument('-s', '--save_model', type=str, default="default", help='Specify the model to save the model to [model_path] (default: same as load_model path, no_save: do not save model)')
-    parser.add_argument('-d', '--data', type=str, default="data/threebody.txt", help='Specify the data to use for training (default: data/threebody.txt)')
+    parser.add_argument('-d', '--data', type=str, default=TRAIN_DATA_PATH, help=f'Specify the data to use for training (default: {TRAIN_DATA_PATH})')
     parser.add_argument('--no_train', type=bool, default=False, help='Do not train the model')
-    parser.add_argument('params', nargs='*', default=[8, 4, 8, 1e-3, 5000, 4, 3, 0.1], help='Training parameters for the model [embedding_size, batch_size, block_size, learning_rate, steps, head_count, layer_count, dropout]\n(default: [4, 8, 8, 1e-3, 5000, 4, 3, 0.1])')
+    parser.add_argument('params', nargs='*', default=LM_MODEL_CONFIG, help=f'Training parameters for the model [embedding_size, batch_size, block_size, learning_rate, steps, head_count, layer_count, dropout]\n(default: {LM_MODEL_CONFIG})')
     # python 
     args=parser.parse_args()
     print(args)
