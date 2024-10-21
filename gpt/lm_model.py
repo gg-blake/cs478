@@ -1,3 +1,9 @@
+"""
+Name : lm_model.py
+Description : Generates text using a transformer model trained on a dataset
+Author : Blake Moody
+Date : 10-18-2024
+"""
 from tokenizer import Tokenizer
 import torch
 import torch.nn.functional as F
@@ -282,6 +288,7 @@ class LanguageModel(nn.Module):
         
         logits = token_idx + positional_idx
         logits = self.blocks(logits)
+        logits = self.layer_norm(logits)
         logits = self.lm_head(logits)
         if targets is not None:
             B, T, C = logits.shape
