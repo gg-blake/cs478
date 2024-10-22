@@ -2,4 +2,5 @@ umb/www.umb.edu
 umb/umb_data
 umb/test-env
 gpt/models
-gpt/data/ubuntu_dataset
+test-env
+gpt/data/*

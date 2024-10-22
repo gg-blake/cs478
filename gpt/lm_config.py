@@ -13,4 +13,4 @@ TOKENIZER_NAME="tiktoken"
 TOKENIZER_MODEL="o200k_base"
 
 # Data Config
-TRAIN_DATA_PATH="data/threebody.txt"
+TRAIN_DATA_PATH="data/openwebtext/test.hf"
