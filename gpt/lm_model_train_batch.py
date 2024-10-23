@@ -42,7 +42,7 @@ def sample(data, batch_size, block_size):
     target = torch.stack([data[start_idx+1:start_idx+block_size+1] for start_idx in starting_indices])
     return sample, target
 
-def train(model, training_tokens, validation_tokens, eval_iters=200, training_val_ratio=0.8, loss_report_interval=500):
+def train(model, training_tokens, validation_tokens, eval_iters=20, training_val_ratio=0.8, loss_report_interval=400):
     """
     Built-in unit test for training the model on a dataset reporting the training and validation loss
 
@@ -63,12 +63,7 @@ def train(model, training_tokens, validation_tokens, eval_iters=200, training_va
     min_training_loss = float('inf')
     min_validation_loss = float('inf')
     for step in range(model.steps):
-        optimizer.zero_grad()
-        s, t = sample(training_tokens, 4, 8)
-        logits, loss = lm(s, t)
-        loss.backward()
-        optimizer.step()
-        if step % loss_report_interval == 0:
+        if step % loss_report_interval == 0 or step - 1 == model.steps:
             losses = _estimate_loss(model, eval_iters, training_tokens, validation_tokens)
             loader.set_description(f"Step {step}: train loss {losses[0]:.4f}, val loss {losses[1]:.4f}")
             if losses[0] < min_training_loss:
@@ -76,6 +71,13 @@ def train(model, training_tokens, validation_tokens, eval_iters=200, training_va
             
             if losses[1] < min_validation_loss:
                 min_validation_loss = losses[1]
+
+        optimizer.zero_grad()
+        s, t = sample(training_tokens, model.batch_size, model.block_size)
+        logits, loss = lm(s, t)
+        loss.backward()
+        optimizer.step()
+        
         loader.update()
 
     loader.close()
@@ -172,8 +174,8 @@ if __name__ == "__main__":
         for i in range(epoch, num_rows):
             tokens = torch.tensor(tokenizer.encode(dataset['train'][i]['text']), device=device)
             eof_token = torch.tensor(tokenizer.encode("<|endoftext|>", allowed_special={"<|endoftext|>"}), device=device)
-            training_tokens = torch.cat([tokens[:floor(len(tokens)*0.5)], eof_token])
-            validation_tokens = torch.cat([tokens[floor(len(tokens)*0.5):], eof_token])
+            training_tokens = torch.cat([tokens[:floor(len(tokens)*0.8)]])
+            validation_tokens = torch.cat([tokens[floor(len(tokens)*0.2):], eof_token])
             try:
                 training_loss, validation_loss = train(
                     model=lm,

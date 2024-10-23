@@ -1,6 +1,9 @@
 umb/www.umb.edu
 umb/umb_data
 umb/test-env
-gpt/models
+gpt/lm_models/*
 test-env
 gpt/data/*
+gpt/lm_config.py
+*/__pycache__
+
