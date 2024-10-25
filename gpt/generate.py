@@ -1,6 +1,6 @@
 import tiktoken
-from lm_model import LanguageModel
-from lm_config import *
+from model import LanguageModel
+from gpt.config import *
 import argparse
 import torch
 import torch.nn.functional as F

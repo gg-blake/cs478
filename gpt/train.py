@@ -5,9 +5,10 @@ import tiktoken
 from math import floor
 from tqdm import tqdm
 import argparse
-from lm_config import *
+from gpt.config import *
 import os
-from lm_model import LanguageModel
+from model import LanguageModel
+import numpy as np
 
 # Load the default model configuration
 LM_MODEL_CONFIG = [
@@ -21,18 +22,22 @@ LM_MODEL_CONFIG = [
     DROPOUT
 ]
 
+epoch = 0
+
 # Set the device to use for training
 device = "cuda" if torch.cuda.is_available() else "cpu"
 if device == "cpu":
     print("Warning: Using CPU for training; consider using a GPU for faster training")
 
-def sample(data, batch_size, block_size):
+def sample(data_path, batch_size, block_size):
+    data = np.memmap(data_path, dtype=np.uint32, mode='r')
     starting_indices = torch.randint(len(data) - block_size, (batch_size,))
-    sample = torch.stack([data[start_idx:start_idx+block_size] for start_idx in starting_indices])
-    target = torch.stack([data[start_idx+1:start_idx+block_size+1] for start_idx in starting_indices])
+    sample = torch.stack([torch.from_numpy((data[start_idx:start_idx+block_size]).astype(np.int64)) for start_idx in starting_indices])
+    target = torch.stack([torch.from_numpy((data[start_idx+1:start_idx+block_size+1]).astype(np.int64)) for start_idx in starting_indices])
+    sample, target = sample.pin_memory().to(device, non_blocking=True), target.pin_memory().to(device, non_blocking=True)
     return sample, target
 
-def train(model, tokens, eval_iters=200, training_val_ratio=0.8, loss_report_interval=500):
+def train(model, training_data_path, validation_data_path, eval_iters=200, training_val_ratio=0.8, loss_report_interval=500):
     """
     Built-in unit test for training the model on a dataset reporting the training and validation loss
 
@@ -48,27 +53,30 @@ def train(model, tokens, eval_iters=200, training_val_ratio=0.8, loss_report_int
         The interval to report the training and validation loss
     """
 
-    training_tokens = tokens[:floor(len(tokens)*training_val_ratio)]
-    validation_tokens = tokens[floor(len(tokens)*training_val_ratio):]
-
+    global epoch
     optimizer = adamw.AdamW(model.parameters(), lr=model.learning_rate)
     loader = tqdm(total=model.steps)
-    for step in range(model.steps):
-        optimizer.zero_grad()
-        s, t = sample(training_tokens, 4, 8)
-        logits, loss = lm(s, t)
-        loss.backward()
-        optimizer.step()
-        if step % loss_report_interval == 0:
-            losses = model._estimate_loss(eval_iters, training_tokens, validation_tokens)
-            loader.set_description(f"Step {step}: train loss {losses[0]:.4f}, val loss {losses[1]:.4f}")
+    loader.update(n=epoch)
+    for step in range(epoch, model.steps):
+        try:
+            optimizer.zero_grad()
+            s, t = sample(training_data_path, model.batch_size, model.block_size)
+            logits, loss = lm(s, t)
+            loss.backward()
+            optimizer.step()
+            if step % loss_report_interval == 0:
+                losses = _estimate_loss(lm, eval_iters, training_data_path, validation_data_path)
+                loader.set_description(f"Step {step}: train loss {losses[0]:.4f}, val loss {losses[1]:.4f}")
 
-        loader.update()
+            loader.update()
+        except KeyboardInterrupt or ValueError:
+            epoch = step
+            break
 
     loader.close()
 
 @torch.no_grad()
-def _estimate_loss(model, eval_iters, training_data, validation_data):
+def _estimate_loss(model, eval_iters, training_data_path, validation_data_path):
     """
     Returns the loss of the model on a training and validation dataset
 
@@ -84,7 +92,7 @@ def _estimate_loss(model, eval_iters, training_data, validation_data):
     out = {}
     # Disable dropout and layer normalization before model validation
     model.eval()
-    for i, split in enumerate([training_data, validation_data]):
+    for i, split in enumerate([training_data_path, validation_data_path]):
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
             X, Y = sample(split, model.batch_size, model.block_size)
@@ -95,55 +103,31 @@ def _estimate_loss(model, eval_iters, training_data, validation_data):
     model.train()
     return out
 
-def useTiktoken(filename, model_name="o200k_base"):
+def useTiktoken(model_name="o200k_base"):
     tokenizer = tiktoken.get_encoding(model_name)
     assert tokenizer.decode(tokenizer.encode("hello world")) == "hello world"
-    with open(filename) as f:
-        tokens = torch.tensor(tokenizer.encode(f.read()), dtype=torch.long, device=device)
-
-    return tokenizer, tokens, tokenizer.n_vocab
-
-def useLocal(filename, model_name="tokenizer_models/umb100k-1.model"):
-    tokenizer = Tokenizer()
-    tokenizer.load(model_name)
-    assert tokenizer.decode(tokenizer.encode("hello world")) == "hello world"
-    with open(filename) as f:
-        tokens = torch.tensor(tokenizer.encode(f.read()), dtype=torch.long, device=device)
-
-    return tokenizer, tokens, len(tokenizer._vocab)
-    
+    return tokenizer, tokenizer.n_vocab
 
 if __name__ == "__main__":
     parser=argparse.ArgumentParser(
         description="""Train a language model on a dataset and generate text""")
-    parser.add_argument('-t', '--tokenizer', type=str, default=TOKENIZER_NAME, help=f'Specify the tokenizer to use (default: {TOKENIZER_NAME})')
-    parser.add_argument('-m', '--tokenizer_model', type=str, default=TOKENIZER_MODEL, help=f'Specify the tokenizer model to use (default: {TOKENIZER_MODEL})')
     parser.add_argument('-l', '--load_model', type=str, default="untrained", help='Specify the model to use [model_path] (default: untrained)')
     parser.add_argument('-s', '--save_model', type=str, default="default", help='Specify the model to save the model to [model_path] (default: same as load_model path, no_save: do not save model)')
-    parser.add_argument('-d', '--data', type=str, default=TRAIN_DATA_PATH, help=f'Specify the data to use for training (default: {TRAIN_DATA_PATH})')
+    parser.add_argument('-d', '--data_dir', type=str, default=TRAIN_DATA_PATH, help=f'Specify the data to use for training (default: {TRAIN_DATA_PATH})')
     parser.add_argument('--no_train', type=bool, default=False, help='Do not train the model')
     parser.add_argument('params', nargs='*', default=LM_MODEL_CONFIG, help=f'Training parameters for the model [embedding_size, batch_size, block_size, learning_rate, steps, head_count, layer_count, dropout]\n(default: {LM_MODEL_CONFIG})')
     # python 
     args=parser.parse_args()
     print(args)
 
-    
+    tokenizer = tiktoken.get_encoding(TOKENIZER_MODEL)
 
-    if not os.path.exists(args.data):
+    if not os.path.exists(args.data_dir):
         print("Error: Data path does not exist. Exiting.")
         exit()
 
-
-    if args.tokenizer == "tokenizer":
-        tokenizer, tokens, vocab_size = useLocal(args.data, args.tokenizer_model)
-    elif args.tokenizer == "tiktoken":
-        tokenizer, tokens, vocab_size = useTiktoken(args.data, args.tokenizer_model)
-    else:
-        print("Invalid tokenizer: must be either 'tokenizer' or 'tiktoken'")
-        exit()
-
     lm = LanguageModel(
-        vocab_size=vocab_size,
+        vocab_size=tokenizer.n_vocab,
         embedding_size=int(args.params[0]),
         batch_size=int(args.params[1]),
         block_size=int(args.params[2]),
@@ -153,10 +137,12 @@ if __name__ == "__main__":
         layer_count=int(args.params[6]),
         dropout=float(args.params[7])
     )
-
+    
     if args.load_model != "untrained":
         try:
-            lm.load_state_dict(torch.load(args.load_model))
+            checkpoint = torch.load(args.load_model)
+            lm.load_state_dict(checkpoint['model_state_dict'])
+            epoch = checkpoint["epoch"]
         except:
             print("Error: Model not found")
             exit()
@@ -164,22 +150,24 @@ if __name__ == "__main__":
         print("Warning: Using untrained model")
     
     if not args.no_train:
-        lm.train_model(tokens)
-
-        
-    
-    start_idx, _ = sample(tokens, lm.batch_size, lm.block_size)
-    outputs = lm.generate(start_idx, max_new_tokens=400)[0].tolist()
-    print(f"Prompt:\n{tokenizer.decode(start_idx[0].tolist())}\nGenerated Response:\n{tokenizer.decode(outputs)}")
+        training_data_path = os.path.join(os.path.dirname(__file__), args.data_dir, "train.bin")
+        validation_data_path = os.path.join(os.path.dirname(__file__), args.data_dir, "validation.bin")
+        train(lm, training_data_path, validation_data_path)
     
     if args.save_model == "default":
         if args.load_model == "untrained":
             print("Warning: Model not saved")
         else:
-            torch.save(lm.state_dict(), args.load_model)
+            torch.save({
+                "epoch": epoch,
+                "model_state_dict": lm.state_dict()
+            }, args.load_model)
     elif args.save_model == "no_save":
         print("Warning: Model not saved")
     else:
-        torch.save(lm.state_dict(), args.save_model) 
+        torch.save({
+            "epoch": epoch,
+            "model_state_dict": lm.state_dict()
+        }, args.save_model)
     
     

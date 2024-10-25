@@ -14,7 +14,7 @@ from math import floor
 from tqdm import tqdm
 import argparse
 import optparse
-from lm_config import *
+from gpt.config import *
 import os
 import datasets
 
