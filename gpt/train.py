@@ -5,7 +5,7 @@ import tiktoken
 from math import floor
 from tqdm import tqdm
 import argparse
-from gpt.config import *
+from model_config import *
 import os
 from model import LanguageModel
 import numpy as np
@@ -103,11 +103,6 @@ def _estimate_loss(model, eval_iters, training_data_path, validation_data_path):
     model.train()
     return out
 
-def useTiktoken(model_name="o200k_base"):
-    tokenizer = tiktoken.get_encoding(model_name)
-    assert tokenizer.decode(tokenizer.encode("hello world")) == "hello world"
-    return tokenizer, tokenizer.n_vocab
-
 if __name__ == "__main__":
     parser=argparse.ArgumentParser(
         description="""Train a language model on a dataset and generate text""")
@@ -118,7 +113,6 @@ if __name__ == "__main__":
     parser.add_argument('params', nargs='*', default=LM_MODEL_CONFIG, help=f'Training parameters for the model [embedding_size, batch_size, block_size, learning_rate, steps, head_count, layer_count, dropout]\n(default: {LM_MODEL_CONFIG})')
     # python 
     args=parser.parse_args()
-    print(args)
 
     tokenizer = tiktoken.get_encoding(TOKENIZER_MODEL)
 
@@ -137,6 +131,9 @@ if __name__ == "__main__":
         layer_count=int(args.params[6]),
         dropout=float(args.params[7])
     )
+
+    total_params = sum(p.numel() for p in lm.parameters())
+    print(f"Number of parameters: {total_params}")
     
     if args.load_model != "untrained":
         try:

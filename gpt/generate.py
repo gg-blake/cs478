@@ -1,12 +1,13 @@
 import tiktoken
 from model import LanguageModel
-from gpt.config import *
+from model_config import *
 import argparse
 import torch
 import torch.nn.functional as F
 import sys
 import datasets
 import os
+from train import sample
 
 # Load the default model configuration
 LM_MODEL_CONFIG = [
@@ -30,12 +31,6 @@ def load_tokenizer(model_name):
     tokenizer = tiktoken.get_encoding(model_name)
     assert tokenizer.decode(tokenizer.encode("hello world")) == "hello world"
     return tokenizer, tokenizer.n_vocab
-
-def sample(data, batch_size, block_size):
-    starting_indices = torch.randint(len(data) - block_size, (batch_size,))
-    sample = torch.stack([data[start_idx:start_idx+block_size] for start_idx in starting_indices])
-    target = torch.stack([data[start_idx+1:start_idx+block_size+1] for start_idx in starting_indices])
-    return sample, target
 
 def generate(model, idx, max_new_tokens):
     """
@@ -61,21 +56,15 @@ def generate(model, idx, max_new_tokens):
 if __name__ == "__main__":
     parser=argparse.ArgumentParser(
         description="""Train a language model on a dataset and generate text""")
-    parser.add_argument('-t', '--tokenizer', type=str, default=TOKENIZER_NAME, help=f'Specify the tokenizer to use (default: {TOKENIZER_NAME})')
-    parser.add_argument('-m', '--tokenizer_model', type=str, default=TOKENIZER_MODEL, help=f'Specify the tokenizer model to use (default: {TOKENIZER_MODEL})')
     parser.add_argument('-l', '--load_model', type=str, default="untrained", help='Specify the model to use [model_path] (default: untrained)')
-    parser.add_argument('-s', '--save_model', type=str, default="default", help='Specify the model to save the model to [model_path] (default: same as load_model path, no_save: do not save model)')
-    parser.add_argument('-d', '--data', type=str, default=TRAIN_DATA_PATH, help=f'Specify the data to use for training (default: {TRAIN_DATA_PATH})')
-    parser.add_argument('--no_train', type=bool, default=False, help='Do not train the model')
+    parser.add_argument('-d', '--data_dir', type=str, default=TRAIN_DATA_PATH, help=f'Specify the data to use for training (default: {TRAIN_DATA_PATH})')
     parser.add_argument('params', nargs='*', default=LM_MODEL_CONFIG, help=f'Training parameters for the model [embedding_size, batch_size, block_size, learning_rate, steps, head_count, layer_count, dropout]\n(default: {LM_MODEL_CONFIG})')
-    # python 
     args=parser.parse_args()
-    print(args)
 
-    tokenizer, vocab_size = load_tokenizer(args.tokenizer_model)
+    tokenizer = tiktoken.get_encoding(TOKENIZER_MODEL)
 
     lm = LanguageModel(
-        vocab_size=vocab_size,
+        vocab_size=tokenizer.n_vocab,
         embedding_size=int(args.params[0]),
         batch_size=int(args.params[1]),
         block_size=int(args.params[2]),
@@ -98,15 +87,9 @@ if __name__ == "__main__":
         print("Error: Using untrained model. Exiting.")
         exit()
 
-    dataset = datasets.load_from_disk("data/openwebtext/test.hf")
-    num_rows = dataset['train'].num_rows
-
-
+    idx, _ = sample(os.path.join(os.path.dirname(__file__), args.data_dir, "validation.bin"), lm.batch_size, lm.block_size)
     max_tokens = input("Max number of generated tokens: ")
     os.system('clear')
-    input_text = dataset['train'][0]['text']
-    print(f"Prompt: {input_text}")
-    idx, _ = sample(torch.tensor(tokenizer.encode(input_text), device=device), lm.batch_size, lm.block_size)
     output = generate(lm, idx, max_new_tokens=int(max_tokens))
     output = tokenizer.decode(output[0].tolist())
     print(f"Generated output: {output}")
