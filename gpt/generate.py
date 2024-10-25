@@ -8,6 +8,8 @@ import sys
 import datasets
 import os
 from train import sample
+from time import time
+from tqdm import tqdm
 
 # Load the default model configuration
 LM_MODEL_CONFIG = [
@@ -43,7 +45,7 @@ def generate(model, idx, max_new_tokens):
     max_new_tokens : int
         The maximum number of tokens to generate
     """
-    for _ in range(max_new_tokens):
+    for _ in tqdm(range(max_new_tokens), desc="Generating tokens"):
         idx_cond = idx[:, -model.block_size:]
         logits, loss = model(idx_cond)
         logits = logits[:, -1, :]
@@ -90,8 +92,14 @@ if __name__ == "__main__":
     idx, _ = sample(os.path.join(os.path.dirname(__file__), args.data_dir, "validation.bin"), lm.batch_size, lm.block_size)
     max_tokens = input("Max number of generated tokens: ")
     os.system('clear')
+    start = time()
     output = generate(lm, idx, max_new_tokens=int(max_tokens))
     output = tokenizer.decode(output[0].tolist())
-    print(f"Generated output: {output}")
+    end = time()
+    with open("output.txt", "w") as f:
+        f.write(output)
+        f.close()
+    
+    print(f"Output saved successfully to output.txt\nGenerated in {(end-start)/1000} seconds")
 
     

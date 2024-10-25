@@ -9,6 +9,7 @@ from model_config import *
 import os
 from model import LanguageModel
 import numpy as np
+from optimization import CosineScheduler
 
 # Load the default model configuration
 LM_MODEL_CONFIG = [
@@ -55,9 +56,11 @@ def train(model, training_data_path, validation_data_path, eval_iters=200, train
 
     global epoch
     optimizer = adamw.AdamW(model.parameters(), lr=model.learning_rate)
+    scheduler = CosineScheduler(initial_lr=6e-4, final_lr=6e-5, max_steps=model.steps)
     loader = tqdm(total=model.steps)
     loader.update(n=epoch)
     for step in range(epoch, model.steps):
+        optimizer.lr = scheduler(step)
         try:
             optimizer.zero_grad()
             s, t = sample(training_data_path, model.batch_size, model.block_size)
@@ -66,7 +69,7 @@ def train(model, training_data_path, validation_data_path, eval_iters=200, train
             optimizer.step()
             if step % loss_report_interval == 0:
                 losses = _estimate_loss(lm, eval_iters, training_data_path, validation_data_path)
-                loader.set_description(f"Step {step}: train loss {losses[0]:.4f}, val loss {losses[1]:.4f}")
+                loader.set_description(f"Step {step}: lr {optimizer.lr:.6f}, train loss {losses[0]:.4f}, val loss {losses[1]:.4f}")
 
             loader.update()
         except KeyboardInterrupt or ValueError:
