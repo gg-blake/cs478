@@ -24,6 +24,9 @@ import nltk
 from nltk.tokenize import sent_tokenize
 import transformers
 import random
+import math
+from datasets import Features, Sequence, Value
+import pyarrow as pa
 
 nltk.download('punkt_tab')  # Download the Punkt sentence tokenizer if not already present
 
@@ -435,54 +438,9 @@ class BERT(nn.Module):
 
 
 if __name__ == "__main__":
-    tokenizer = tiktoken.get_encoding("o200k_base")
-    tokenizer._special_tokens["[SEP]"] = tokenizer.max_token_value + 1
-    data_path = "gpt/data/openwebtext/train.bin"
-    data = np.memmap(data_path, dtype=np.uint32, mode='r')
-    block_size = 128
-    batch_size = 4
-
-    
-    dataset = datasets.load_dataset("stas/openwebtext-10k", num_proc=8)
-
-    # owt by default only contains the 'train' split, so create a test split
-    split_dataset = dataset["train"].train_test_split(test_size=0.0005, seed=2357, shuffle=True)
-    split_dataset['val'] = split_dataset.pop('test') # rename the test split to val
-    
-    
     
 
-    # For more details - https://huggingface.co/bert-base-uncased
-    tokenizer_bert = BertTokenizer.from_pretrained('bert-base-uncased', model_max_length=block_size)
-
-    transformers.logging.set_verbosity_error()
-    def process(example):
-        sentences = sent_tokenize(example["text"])
-        return {'result': list(zip(sentences[0:-2], sentences[1:-1]))}
-
-    def process_rand(example):
-        result = []
-        for p0, p1 in example['result']:
-            if bool(np.random.binomial(n=1, p=0.5)):
-                pair = tokenizer_bert(p0, p1, truncation="longest_first", padding="max_length")
-            else:
-                set_r = random.choice(['train', 'val'])
-                text_r = random.choice(output[set_r])
-                try:
-                    result_r = random.choice(text_r['result'])
-                    pair = tokenizer_bert(p0, result_r[1], truncation="longest_first", padding="max_length")
-                except IndexError:
-                    continue
-            result.append(pair)
-
-        return {'result': result}
-    
-
-
-    output = split_dataset.map(process, remove_columns=['text'], num_proc=8)
-    output = output.map(process_rand, num_proc=8)
-
-    print(output['train'][0])
+    # 256 * 4bytes * 3 (attention mask, input ids, and token type ids) * 8013769 examples = ~24.6GB
 
     
         
