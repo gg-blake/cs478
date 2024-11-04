@@ -4,7 +4,7 @@ Description : Generates text using a transformer model trained on a dataset
 Author : Blake Moody
 Date : 10-18-2024
 """
-from tokenizer import Tokenizer
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -17,6 +17,15 @@ import optparse
 from model_config import *
 import os
 import datasets
+import numpy as np
+import torch
+from transformers import BertTokenizer
+import nltk
+from nltk.tokenize import sent_tokenize
+import transformers
+import random
+
+nltk.download('punkt_tab')  # Download the Punkt sentence tokenizer if not already present
 
 # Load the default model configuration
 LM_MODEL_CONFIG = [
@@ -80,7 +89,7 @@ class AttentionHead(nn.Module):
         # We want to apply a mask to the attention scores to prevent the model from cheating during training
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size, device=device))) # Lower triangular matrix
 
-    def forward(self, embeddings):
+    def forward(self, embeddings, masked=True):
         """
         Forward passes a list of embeddings through the attention head and returns the attention scores
 
@@ -99,7 +108,8 @@ class AttentionHead(nn.Module):
         wei = query @ key.transpose(-2, -1) * self.embed_size**-0.5 
         # When training a model, we don't want embeddings that are ahead of an embedding in a block to send information to it (its like cheating in a test)
         # So we will apply a mask to wei
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
+        if masked:
+            wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
         # Then we apply a softmax to make the output on interval [0,1)
         wei = torch.softmax(wei, dim=-1)
         # We don't apply the embeddings directly to wei but instead we apply another backpropagatable linear layer to the embeddings (called value) and then apply wei
@@ -316,24 +326,164 @@ class LanguageModel(nn.Module):
 
         return logits, loss
     
-    def generate(self, idx, max_new_tokens):
+class BERT(nn.Module):
+    """
+    A class that represents a language model that can be trained on a dataset and generate text
+
+    Attributes
+    ----------
+    batch_size : int
+        The number of samples to process in a single forward pass
+    block_size : int
+        The number of tokens in a block
+    learning_rate : float
+        The learning rate for the optimizer
+    steps : int
+        The number of steps to train the model
+    token_embeddings : nn.Embedding
+        The embeddings for the tokens
+    positional_embeddings : nn.Embedding
+        The embeddings for the positions of the tokens
+    blocks : nn.Sequential
+        The transformer blocks
+    layer_norm : nn.LayerNorm
+        The layer normalization layer
+    lm_head : nn.Linear
+        The linear layer for the language model head
+
+    Methods
+    -------
+    forward(idx, targets=None)
+        Forward pass of the model
+    generate(idx, max_new_tokens)
+        Generate text from the model
+    train_model(tokens, eval_iters=200, training_val_ratio=0.8, loss_report_interval=500)
+        Train the model on a dataset
+    _estimate_loss(eval_iters, training_data, validation_data)
+        Estimate the loss of the model on a dataset
+    """
+    def __init__(self, vocab_size, embedding_size, batch_size, block_size, learning_rate, steps, head_count, layer_count, dropout):
         """
-        Generate text from the model given an initial set of sample tokens; it's essentially a wrapper around the forward pass but there is not backpropagation
+        Parameters
+        ----------
+        vocab_size : int
+            The size of the vocabulary
+        embedding_size : int
+            The size of the embeddings
+        batch_size : int
+            The number of samples to process in a single forward pass
+        block_size : int
+            The number of tokens in a block
+        learning_rate : float
+            The learning rate for the optimizer
+        steps : int
+            The number of steps to train the model
+        head_count : int
+            The number of heads in the multiheaded attention layer
+        layer_count : int
+            The number of transformer blocks
+        dropout : float
+            The rate at which nodes in the network are randomly zeroed out during training to prevent overfitting
+        """
+        super().__init__()
+        self.batch_size = batch_size
+        self.block_size = block_size
+        self.learning_rate = learning_rate
+        self.steps = steps
+        self.vocab_size = vocab_size
+        self.token_embeddings = nn.Embedding(vocab_size+2, embedding_size, device=device)
+        self.segment_embeddings = nn.Embedding(2, embedding_size, device=device)
+        self.positional_embeddings = nn.Embedding(block_size, embedding_size, device=device)
+        self.blocks = nn.Sequential(*[TransformerBlock(embedding_size, embedding_size, head_count, block_size, dropout) for _ in range(layer_count)])
+        self.layer_norm = nn.LayerNorm(embedding_size, device=device)
+        self.lm_head = nn.Linear(embedding_size, vocab_size, bias=False, device=device)
+        self.current_index = 0
+
+    def forward(self, input_ids, attention_mask, sentence_ids, targets=None):
+        """
+        Forward pass of the model of a batch of tokens; each batch consistss of a number of blocks/examples of tokens from the training/validation data
 
         Parameters
         ----------
         idx : torch.Tensor
             The batch of tokens [B x T] where B is the batch size and T is the number of tokens in a block
-        max_new_tokens : int
-            The maximum number of tokens to generate
+        targets : torch.Tensor, optional
+            The target tokens [B x T]; this is normally the idx tensor shifted by one token to the right in all the batches to predict the next token; parameter is only specified during training
         """
-        for _ in range(max_new_tokens):
-            idx_cond = idx[:, -self.block_size:]
-            logits, loss = self(idx_cond)
-            logits = logits[:, -1, :]
-            probs = F.softmax(logits, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)
-            idx = torch.cat((idx, idx_next), dim=1)
-        return idx
+        B, T = idx.shape
+        
+        B, T = idx.shape
+        token_idx = self.token_embeddings(idx)
+        positional_idx = self.positional_embeddings(torch.arange(T, device=device))
+        sentence_idx = self.sentence_embeddings()
+        logits = token_idx + positional_idx
+        logits = self.blocks(logits)
+        logits = self.layer_norm(logits)
+        logits = self.lm_head(logits)
+        if targets is not None:
+            B, T, C = logits.shape
+            logits = logits.view(B*T, C)
+            targets = targets.view(B*T)
+            loss = F.cross_entropy(logits, targets)
+        else:
+            loss = None
+
+        return logits, loss
+
+
+
+
+
+if __name__ == "__main__":
+    tokenizer = tiktoken.get_encoding("o200k_base")
+    tokenizer._special_tokens["[SEP]"] = tokenizer.max_token_value + 1
+    data_path = "gpt/data/openwebtext/train.bin"
+    data = np.memmap(data_path, dtype=np.uint32, mode='r')
+    block_size = 128
+    batch_size = 4
+
     
-       
+    dataset = datasets.load_dataset("stas/openwebtext-10k", num_proc=8)
+
+    # owt by default only contains the 'train' split, so create a test split
+    split_dataset = dataset["train"].train_test_split(test_size=0.0005, seed=2357, shuffle=True)
+    split_dataset['val'] = split_dataset.pop('test') # rename the test split to val
+    
+    
+    
+
+    # For more details - https://huggingface.co/bert-base-uncased
+    tokenizer_bert = BertTokenizer.from_pretrained('bert-base-uncased', model_max_length=block_size)
+
+    transformers.logging.set_verbosity_error()
+    def process(example):
+        sentences = sent_tokenize(example["text"])
+        return {'result': list(zip(sentences[0:-2], sentences[1:-1]))}
+
+    def process_rand(example):
+        result = []
+        for p0, p1 in example['result']:
+            if bool(np.random.binomial(n=1, p=0.5)):
+                pair = tokenizer_bert(p0, p1, truncation="longest_first", padding="max_length")
+            else:
+                set_r = random.choice(['train', 'val'])
+                text_r = random.choice(output[set_r])
+                try:
+                    result_r = random.choice(text_r['result'])
+                    pair = tokenizer_bert(p0, result_r[1], truncation="longest_first", padding="max_length")
+                except IndexError:
+                    continue
+            result.append(pair)
+
+        return {'result': result}
+    
+
+
+    output = split_dataset.map(process, remove_columns=['text'], num_proc=8)
+    output = output.map(process_rand, num_proc=8)
+
+    print(output['train'][0])
+
+    
+        
+
