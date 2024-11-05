@@ -3,7 +3,8 @@ umb/umb_data
 umb/test-env
 gpt/lm_models/*
 test-env
-gpt/data/*
+gpt/data/*/*.bin
+gpt/data/openwebtext/test.hf
 gpt/lm_config.py
 */__pycache__
 
