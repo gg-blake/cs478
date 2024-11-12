@@ -17,7 +17,7 @@ def extract_as_txt(filename):
         for i in range(number_of_pages):
             page = reader.pages[i]
             text = page.extract_text(extraction_mode="layout", layout_mode_space_vertically=False)
-            text = re.sub(re.compile("\s+Page\s[0-9]+\sof\s[0-9]+(\s+)?"), "", text)
+            text = re.sub(re.compile("\s+Page\s[0-9]+\sof\s[0-9]+(\s+)?"), "\n", text)
             f.write(text)
         
         f.close()
@@ -51,9 +51,8 @@ if __name__ == "__main__":
     f.close()
 
     entry_data = []
-    text = "\n".join(re.split(re.compile("\s+Page\s[0-9]+\sof\s[0-9]+\s+"), text))
     section_pattern = r"(NO|OK|\+\-)\s+(((\s+[A-Z0-9\:\&\/\']+)+)(\s+\*+(\s+(\s+([A-Z0-9\:\&\/\']+))+)?)?)"
-    subsection_pattern = r"(\s{3,}|\n\s*|GPA)(\-|\+|ip\s*(\-|\+))(\s+R\s)?(\s+[0-9]\))?\s*(([A-Z0-9(\/)\:\']([A-Za-z0-9\/\:\'\-]+\s)*)([A-Za-z0-9\/\:\-\']+))(\s{3,}|\n\s*)"
+    subsection_pattern = r"(\s{3,}|\n\s*)(\-|\+|ip\s*(\-|\+))(\s+R\s)?(\s+[0-9]\))?\s*(([A-Z0-9(\/)\:\']([A-Za-z0-9\/\:\'\-]+\s)*)([A-Za-z0-9\/\:\-\']+))(\s{3,}|\n\s*)"
     entry_pattern = r"(([a-zA-Z0-9]{4})\s+([a-zA-z]+\s?[0-9]+([a-zA-Z]?)+)\s+([0-9]+\.[0-9]+)\s+([A-Za-z\-\+\/]+)\s+(\>S|\>X|\>\-|RP|\>D|\>R)?\s+((([\w\&\/]+\s)+)?\w+(\n|[^.])?))"
     sections = extract_section(text, section_pattern)
     validation_length = len([_ for _ in extract_section(text, entry_pattern)])
