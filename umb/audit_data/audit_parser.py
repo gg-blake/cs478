@@ -1,8 +1,8 @@
 """
-Name : build_catalog.py
-Description : Scraper tool for pulling all the UMB course catalog, formatting it and saving it to JSON for RAG pipelines
+Name : audit_parser.py
+Description : Tool to parse UMass Boston student degree audits
 Author : Blake Moody
-Date : 11-8-2024
+Date : 11-9-2024
 """
 from pypdf import PdfReader
 import regex as re
