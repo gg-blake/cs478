@@ -22,18 +22,7 @@ def extract_as_txt(filename):
         
         f.close()
 
-def extract_sections_by_status(text):
-    pattern = re.compile(f"(NO|OK|\+\-)\s+([A-Za-z0-9]+( [A-Za-z0-9]+)+)\s+\*+")
-    '''keys = [x[0] for x in pattern.findall(text)]
-    values = re.split(pattern, text)'''
-    matches = list(re.finditer(pattern, text))
-
-    return matches
-
 def extract_section(text, pattern):
-    
-    '''keys = [x[0] for x in pattern.findall(text)]
-    values = re.split(pattern, text)'''
     s = list(re.finditer(pattern, text))
     matches = [x.start() for x in s]
     matches_shifted = matches[1:] + [len(text)]
@@ -60,12 +49,10 @@ if __name__ == "__main__":
     with open(f"txt/{audit_name}.txt", "r") as f:
         text = f.read()
     f.close()
+
     entry_data = []
     text = "\n".join(re.split(re.compile("\s+Page\s[0-9]+\sof\s[0-9]+\s+"), text))
-    
-    
     section_pattern = r"(NO|OK|\+\-)\s+(((\s+[A-Z0-9\:\&\/\']+)+)(\s+\*+(\s+(\s+([A-Z0-9\:\&\/\']+))+)?)?)"
-    
     subsection_pattern = r"(\s{3,}|\n\s*|GPA)(\-|\+|ip\s*(\-|\+))(\s+R\s)?(\s+[0-9]\))?\s*(([A-Z0-9(\/)\:\']([A-Za-z0-9\/\:\'\-]+\s)*)([A-Za-z0-9\/\:\-\']+))(\s{3,}|\n\s*)"
     entry_pattern = r"(([a-zA-Z0-9]{4})\s+([a-zA-z]+\s?[0-9]+([a-zA-Z]?)+)\s+([0-9]+\.[0-9]+)\s+([A-Za-z\-\+\/]+)\s+(\>S|\>X|\>\-|RP|\>D|\>R)?\s+((([\w\&\/]+\s)+)?\w+(\n|[^.])?))"
     sections = extract_section(text, section_pattern)
