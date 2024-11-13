@@ -8,6 +8,54 @@ from pypdf import PdfReader
 import regex as re
 import json
 import sys
+import json
+
+section_pattern = r"(NO|OK|\+\-)\s+(((\s+[A-Z0-9\:\&\/\']+)+)(\s+\*+(\s+(\s+([A-Z0-9\:\&\/\']+))+)?)?)"
+subsection_pattern = r"(\s{3,}|\n\s*)(\-|\+|ip\s*(\-|\+))(\s+R\s)?(\s+[0-9]\))?\s*(([A-Z0-9(\/)\:\']([A-Za-z0-9\/\:\'\-]+\s)*)([A-Za-z0-9\/\:\-\']+))(\s{3,}|\n\s*)"
+entry_pattern = r"(([a-zA-Z0-9]{4})\s+([a-zA-z]+\s?[0-9]+([a-zA-Z]?)+)\s+([0-9]+\.[0-9]+)\s+([A-Za-z\-\+\/]+)\s+(\>S|\>X|\>\-|RP|\>D|\>R)?\s+((([\w\&\/]+\s)+)?\w+(\n|[^.])?))"
+reqs_pattern = r"((Needs\:)\s+([1-9]+)\s*.+(\n\s+)?)?(Select from\:)(((\s+[A-Z]+\s*)?(\,)?([0-9]+[A-Z]*)(\([A-Z0-9\s]+\))?(\,)?)+)"
+req_option_pattern = r"([A-Z]+)?\s*((([0-9]+)([A-Z])?)(\s*TO\s*([0-9]+))?)"
+
+course_catalog = {}
+with open("../course_data/data.json", "r") as f:
+    course_catalog = json.load(f)
+
+print(len(course_catalog.keys()))
+
+class Response:
+    def __init__(self, status: bool, message: str):
+        self.status = status
+        self.message = message
+
+    def __dict__(self):
+        return {
+            "status": self.status,
+            "message": self.message
+        }
+    
+    def __str__(self):
+        print(self.__dict__())
+
+def is_course_available(key):
+    if key not in course_catalog.keys():
+        return Response(False, "not found")
+    
+    if "sessions" not in course_catalog[key].keys():
+        return Response(False, "no sessions available")
+    
+    session_available = False
+    for course_session in course_catalog[key]["sessions"]:
+        is_full = int(course_session["enrolled"]) >= int(course_session["capacity"])
+        is_closed = course_session["status"].lower() != "open"
+        if not is_full and not is_closed:
+            session_available = True
+
+    if not session_available:
+        return Response(False, "all sessions are closed or unavailable")
+
+    return Response(True, "session is available")
+    
+
 
 def extract_as_txt(filename):
     reader = PdfReader(f"pdf/{filename}.pdf")
@@ -22,7 +70,7 @@ def extract_as_txt(filename):
         
         f.close()
 
-def extract_section(text, pattern):
+def extract_section(pattern, text):
     s = list(re.finditer(pattern, text))
     matches = [x.start() for x in s]
     matches_shifted = matches[1:] + [len(text)]
@@ -42,6 +90,56 @@ def add_entry(group_list):
     }
     entry_data.append(data)
 
+def add_all_entries(text):
+    global entry_pattern
+    entries = extract_section(entry_pattern, text)
+    for entry_obj, _ in entries:
+        group_list = list(entry_obj.groups())
+        add_entry(group_list)
+
+def add_req(key):
+    if key in course_catalog.keys():
+        data = {
+            "course": key,
+            "type": " ".join(str(section_key).split()),
+            "subtype": " ".join(str(entry_title).split()),
+            "availability": is_course_available(key).__dict__(),
+            **(course_catalog[key])
+        }
+    else:
+        data = {
+            "course": key,
+            "type": " ".join(str(section_key).split()),
+            "subtype": " ".join(str(entry_title).split()),
+            "availability": is_course_available(key).__dict__()
+        }
+    req_data.append(data)
+
+def add_all_reqs(text):
+    reqs = extract_section(reqs_pattern, text)
+    course_code = ""
+    for _, reqs_str in reqs:
+        req_options = extract_section(req_option_pattern, reqs_str)
+        for req_option_obj, req_option_str in list(req_options)[1:]:
+            program_prefix = req_option_obj.group(1)
+            program_suffix = req_option_obj.group(4)
+            program_range = req_option_obj.group(7)
+            min = int(program_suffix)
+            max = min
+            if program_prefix is not None:
+                course_code = program_prefix
+
+            if program_range is not None:
+                max = int(program_range)
+
+            for i in range(min, max):
+                key = course_code + str(i) if i != min else course_code + req_option_obj.group(3)
+                if key in course_catalog.keys():
+                    add_req(key)
+            
+            key = course_code + req_option_obj.group(3)
+            add_req(key)
+
 if __name__ == "__main__":
     audit_name = sys.argv[1]
     extract_as_txt(audit_name)
@@ -51,37 +149,32 @@ if __name__ == "__main__":
     f.close()
 
     entry_data = []
-    section_pattern = r"(NO|OK|\+\-)\s+(((\s+[A-Z0-9\:\&\/\']+)+)(\s+\*+(\s+(\s+([A-Z0-9\:\&\/\']+))+)?)?)"
-    subsection_pattern = r"(\s{3,}|\n\s*)(\-|\+|ip\s*(\-|\+))(\s+R\s)?(\s+[0-9]\))?\s*(([A-Z0-9(\/)\:\']([A-Za-z0-9\/\:\'\-]+\s)*)([A-Za-z0-9\/\:\-\']+))(\s{3,}|\n\s*)"
-    entry_pattern = r"(([a-zA-Z0-9]{4})\s+([a-zA-z]+\s?[0-9]+([a-zA-Z]?)+)\s+([0-9]+\.[0-9]+)\s+([A-Za-z\-\+\/]+)\s+(\>S|\>X|\>\-|RP|\>D|\>R)?\s+((([\w\&\/]+\s)+)?\w+(\n|[^.])?))"
-    sections = extract_section(text, section_pattern)
-    validation_length = len([_ for _ in extract_section(text, entry_pattern)])
+    req_data = []
+    
+    sections = extract_section(section_pattern, text)
+    validation_length = len([_ for _ in extract_section(entry_pattern, text)])
 
     for section_obj, section_str in sections:
-        subsections = extract_section(section_str, subsection_pattern)
+        subsections = list(extract_section(subsection_pattern, section_str))
         section_key = section_obj.groups()[2]
-        has_subsection = False
+
+        if len(subsections) == 0:
+            entry_title = section_key
+            add_all_entries(section_str)
+            add_all_reqs(section_str)
+            continue
         
         for subsection_obj, subsection_str in subsections:
             has_subsection = True
             entry_title = subsection_obj.groups()[5]
-            
-            entries = extract_section(subsection_str, entry_pattern)
-            for entry_obj, entry_str in entries:
-                group_list = list(entry_obj.groups())
-                add_entry(group_list)
-            
-        if has_subsection:
-            continue
-
-        entries = extract_section(section_str, entry_pattern)
-        entry_title = section_key
-        for entry_obj, entry_str in entries:
-            group_list = list(entry_obj.groups())
-            add_entry(group_list)
+            add_all_entries(subsection_str)
+            add_all_reqs(subsection_str)
         
-    with open(f"json/{audit_name}.json", "w+") as outfile: 
+    with open(f"json/{audit_name}-past.json", "w+") as outfile: 
         json.dump(entry_data, outfile, indent=4)
+
+    with open(f"json/{audit_name}.json", "w+") as outfile:
+        json.dump(req_data, outfile, indent=4)
 
     if len(entry_data) != validation_length:
         print(f"Warning: Failed to parse {validation_length - len(entry_data)} entries")
@@ -90,10 +183,3 @@ if __name__ == "__main__":
         print("Parsing complete! ", end="")
 
     print("Saved as", f"json/{audit_name}.json")
-    
-
-# (NO|OK|\+\-)\s+(((\s+[A-Z0-9\:\&\/\']+)+)(\s+\*+(\s+(\s+([A-Z0-9\:\&\/\']+))+)?)?)
-# ((NO|OK|\+\-)\s+(((\s+[A-Z0-9\:\&\/\']+)+)(\s+\*+(\s+(\s+([A-Z0-9\:\&\/\']+))+)?)?)|(\n\s|\s\s|\n)(ip\s)?(\-|\+)\s{2,}([0-9]+\))?\s?([A-Za-z\/\-\:0-9]+\s(\-\s)?)+)\s(^(?:(?!((NO|OK|\+\-)\s+([A-Za-z0-9]+( [A-Za-z0-9]+)+)\s+\*+|(\n\s|\s\s|\n)(ip\s)?(\-|\+)\s{2,}([0-9]+\))?\s?([A-Za-z\/\-\:0-9]+\s(\-\s)?)+)).)*$\n){0,}
-# ((NO|OK|\+\-)\s+([A-Za-z0-9]+( [A-Za-z0-9]+)+)\s+\*+|(\n\s|\s\s|\n)(ip\s)?(\-|\+)\s{2,}([0-9]+\))?\s?([A-Za-z\/\-\:0-9]+\s(\-\s)?)+)\s(^(?:(?!((NO|OK|\+\-)\s+([A-Za-z0-9]+( [A-Za-z0-9]+)+)\s+\*+|(\n\s|\s\s|\n)(ip\s)?(\-|\+)\s{2,}([0-9]+\))?\s?([A-Za-z\/\-\:0-9]+\s(\-\s)?)+)).)*$\n){0,}
-# (\s{3,}|\n\s*)(\-|\+|ip\s*(\-|\+))(\s+R\s)?(\s+[0-9]\))?\s*([A-Za-z0-9]+)(\s[A-Za-z0-9]+)*(\s{3,}|\n\s*)
-# (\s{3,}|\n\s*)(\-|\+|ip\s*(\-|\+))(\s+R\s)?(\s+[0-9]\))?\s*(([A-Z0-9(\/)\:\']([A-Za-z0-9\/\:\'\-]+\s)*)([A-Za-z0-9\/\:\-\']+))(\s{3,}|\n\s*)
