@@ -45,8 +45,10 @@ packaging==24.1
 pandas==2.2.3
 propcache==0.2.0
 pyarrow==17.0.0
+pypdf==5.1.0
 PySocks==1.7.1
 python-dateutil==2.9.0.post0
+python-magic==0.4.27
 pytz==2024.2
 PyYAML==6.0.2
 regex==2024.9.11
