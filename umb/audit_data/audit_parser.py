@@ -4,6 +4,8 @@ Description : Tool to parse UMass Boston student degree audits
 Author : Blake Moody
 Date : 11-9-2024
 """
+from io import BytesIO
+from typing import Any, Dict, List, TypedDict
 from pypdf import PdfReader
 import regex as re
 import json
@@ -55,7 +57,20 @@ def is_course_available(key):
 
     return Response(True, "session is available")
     
+def extract_as_txt_from_request_file(file):
+    pdf_bytes = BytesIO(file.read())
+    
+    reader = PdfReader(pdf_bytes)
+    number_of_pages = len(reader.pages)
 
+    extracted_text = ""
+    for i in range(number_of_pages):
+        page = reader.pages[i]
+        text = page.extract_text(extraction_mode="layout", layout_mode_space_vertically=False)
+        text = re.sub(re.compile("\s+Page\s[0-9]+\sof\s[0-9]+(\s+)?"), "\n", text)
+        extracted_text += text
+    
+    return extracted_text
 
 def extract_as_txt(filename):
     reader = PdfReader(f"pdf/{filename}.pdf")
@@ -78,7 +93,7 @@ def extract_section(pattern, text):
     
     return zip(s, zipped)
 
-def add_entry(group_list):
+def add_entry(entry_data, group_list, section_key, entry_title: str):
     data = {
         "term": group_list[1],
         "course": group_list[2],
@@ -90,14 +105,14 @@ def add_entry(group_list):
     }
     entry_data.append(data)
 
-def add_all_entries(text):
+def add_all_entries(text: str, entry_data, section_key: str, entry_title: str) -> None:
     global entry_pattern
     entries = extract_section(entry_pattern, text)
     for entry_obj, _ in entries:
         group_list = list(entry_obj.groups())
-        add_entry(group_list)
+        add_entry(entry_data, group_list, section_key, entry_title)
 
-def add_req(key):
+def add_req(key: str, section_key: str, entry_title: str, req_data):
     if key in course_catalog.keys():
         data = {
             "course": key,
@@ -115,7 +130,7 @@ def add_req(key):
         }
     req_data.append(data)
 
-def add_all_reqs(text):
+def add_all_reqs(text: str, section_key: str, entry_title: str, req_data: List[Any]) -> None:
     reqs = extract_section(reqs_pattern, text)
     course_code = ""
     for _, reqs_str in reqs:
@@ -135,19 +150,16 @@ def add_all_reqs(text):
             for i in range(min, max):
                 key = course_code + str(i) if i != min else course_code + req_option_obj.group(3)
                 if key in course_catalog.keys():
-                    add_req(key)
+                    add_req(key, section_key, entry_title, req_data)
             
             key = course_code + req_option_obj.group(3)
-            add_req(key)
+            add_req(key, section_key, entry_title, req_data)
 
-if __name__ == "__main__":
-    audit_name = sys.argv[1]
-    extract_as_txt(audit_name)
-    text = ""
-    with open(f"txt/{audit_name}.txt", "r") as f:
-        text = f.read()
-    f.close()
+class AuditParserOutput(TypedDict):
+    entry_data: Any
+    req_data: Any
 
+def parse_audit_text(text: str) -> AuditParserOutput:
     entry_data = []
     req_data = []
     
@@ -160,26 +172,38 @@ if __name__ == "__main__":
 
         if len(subsections) == 0:
             entry_title = section_key
-            add_all_entries(section_str)
-            add_all_reqs(section_str)
+            add_all_entries(section_str, entry_data, section_key, entry_title)
+            add_all_reqs(section_str, section_key, entry_title, req_data)
             continue
         
         for subsection_obj, subsection_str in subsections:
-            has_subsection = True
             entry_title = subsection_obj.groups()[5]
-            add_all_entries(subsection_str)
-            add_all_reqs(subsection_str)
-        
-    with open(f"json/{audit_name}-past.json", "w+") as outfile: 
-        json.dump(entry_data, outfile, indent=4)
-
-    with open(f"json/{audit_name}.json", "w+") as outfile:
-        json.dump(req_data, outfile, indent=4)
+            add_all_entries(subsection_str, entry_data, section_key, entry_title)
+            add_all_reqs(subsection_str, section_key, entry_title, req_data)
 
     if len(entry_data) != validation_length:
-        print(f"Warning: Failed to parse {validation_length - len(entry_data)} entries")
-        print("\tTotal entries:", len(entry_data), "Expected entries:", validation_length, "\n")
-    else:
-        print("Parsing complete! ", end="")
+        print("Warning: Validation failed for audit text parsing.")
+
+    return {
+        "entry_data": entry_data,
+        "req_data": req_data
+    }
+
+if __name__ == "__main__":
+    audit_name = sys.argv[1]
+    extract_as_txt(audit_name)
+    text = ""
+    with open(f"txt/{audit_name}.txt", "r") as f:
+        text = f.read()
+    f.close()
+
+    parse_result = parse_audit_text(text)
+
+        
+    with open(f"json/{audit_name}-past.json", "w+") as outfile: 
+        json.dump(parse_result["entry_data"], outfile, indent=4)
+
+    with open(f"json/{audit_name}.json", "w+") as outfile:
+        json.dump(parse_result["req_data"], outfile, indent=4)
 
     print("Saved as", f"json/{audit_name}.json")
