@@ -8,4 +8,6 @@ gpt/data/openwebtext/test.hf
 gpt/lm_config.py
 */__pycache__
 umb/audit_data/*/*
+!umb/audit_data/static/
+!umb/audit_data/static/**
 venv/*
