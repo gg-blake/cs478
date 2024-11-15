@@ -1,2 +1,2 @@
-ratemyprofessor
-vaderSentiment
+RateMyProfessorAPI==1.3.6
+vaderSentiment==3.3.2
