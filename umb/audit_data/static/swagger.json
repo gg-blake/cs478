@@ -1,0 +1,66 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Audit Report Parser API",
+    "description": "API for parsing audit report PDFs",
+    "version": "1.0.0"
+  },
+  "basePath": "/",
+  "schemes": [
+    "http"
+  ],
+  "consumes": [
+    "multipart/form-data"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/parse_audit_report": {
+      "post": {
+        "tags": ["Audit Report"],
+        "summary": "Parse an audit report PDF file",
+        "consumes": ["multipart/form-data"],
+        "parameters": [
+          {
+            "in": "formData",
+            "name": "file",
+            "type": "file",
+            "required": true,
+            "description": "The PDF file to parse"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PDF processed successfully",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string",
+                  "example": "PDF processed successfully"
+                },
+                "data": {
+                  "type": "object",
+                  "description": "Parsed audit report data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string",
+                  "example": "No file provided"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+} 
