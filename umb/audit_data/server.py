@@ -8,10 +8,10 @@ app = Flask(__name__)
 
 @app.route('/parse_audit_report', methods=['POST'])
 def parse_audit_report():
-    if 'file' not in request.files:
+    if not request.files:
         return jsonify({'error': 'No file provided'}), 400
         
-    file = request.files['file']
+    file = next(iter(request.files.values()))
     
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
