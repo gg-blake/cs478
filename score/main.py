@@ -1,11 +1,12 @@
 import ratemyprofessor
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from typing import List, Dict, Optional
 
 class ProfessorAnalyzer:
     def __init__(self):
         self.sentiment_analyzer = SentimentIntensityAnalyzer()
         
-    def get_professor(self, name, school_name):
+    def get_professor(self, name: str, school_name: str) -> Optional[ratemyprofessor.Professor]:
         school = ratemyprofessor.get_school_by_name(school_name)
         professors = ratemyprofessor.get_professors_by_school_and_name(school, name)
         
@@ -14,7 +15,7 @@ class ProfessorAnalyzer:
                 return prof
         return None
     
-    def analyze_comments(self, professor):
+    def analyze_comments(self, professor: ratemyprofessor.Professor) -> Dict[str, float]:
         ratings = professor.get_ratings()
         weighted_compound = 0
         total_weight = 0
@@ -39,7 +40,7 @@ class ProfessorAnalyzer:
             'neu': 1 - abs(avg_sentiment)
         }
     
-    def calculate_overall_score(self, professor, sentiment):
+    def calculate_overall_score(self, professor: ratemyprofessor.Professor, sentiment: Dict[str, float]) -> float:
         weights = {
             'rating': 0.25,
             'sentiment': 0.25,
@@ -57,18 +58,26 @@ class ProfessorAnalyzer:
         overall_score = sum(weights[key] * normalized_scores[key] for key in weights)
         return overall_score * 100
 
-def main():
-    analyzer = ProfessorAnalyzer()
-    
-    # Example: Daniel Haehn, University of Massachusetts - Boston
-    name = input("Enter professor's name: ")
-    school = input("Enter school name: ")
-    
-    professor = analyzer.get_professor(name, school)
-    
-    if professor is None:
-        print("Professor not found.")
-        return
+    def analyze_professor(self, name: str, school_name: str) -> Optional[Dict]:
+        professor = self.get_professor(name, school_name)
+        
+        if professor is None:
+            print(f"Professor {name} not found.")
+            return None
+            
+        sentiment = self.analyze_comments(professor)
+        overall_score = self.calculate_overall_score(professor, sentiment)
+        
+        return {
+            'professor': professor,
+            'sentiment': sentiment,
+            'overall_score': overall_score
+        }
+
+def print_professor_details(analysis: Dict) -> None:
+    professor = analysis['professor']
+    sentiment = analysis['sentiment']
+    overall_score = analysis['overall_score']
     
     print(f"\nProfessor: {professor.name}")
     print(f"Department: {professor.department}")
@@ -81,15 +90,50 @@ def main():
     else:
         print("Would Take Again: N/A")
     
-    sentiment = analyzer.analyze_comments(professor)
     print("\nWeighted Comment Sentiment Analysis:")
     print(f"Positive: {sentiment['pos']:.2f}")
     print(f"Neutral: {sentiment['neu']:.2f}")
     print(f"Negative: {sentiment['neg']:.2f}")
     print(f"Compound: {sentiment['compound']:.2f}")
     
-    overall_score = analyzer.calculate_overall_score(professor, sentiment)
     print(f"\nOverall Professor Score: {overall_score:.1f}%")
+
+def main():
+    analyzer = ProfessorAnalyzer()
+    
+    # Get input for school and professors
+    school = input("Enter school name: ")
+    print("Enter professor names (one per line, press Enter twice when done):")
+    
+    professor_names = []
+    while True:
+        name = input()
+        if not name:
+            break
+        professor_names.append(name)
+    
+    # Analyze all professors
+    professor_analyses = []
+    for name in professor_names:
+        analysis = analyzer.analyze_professor(name, school)
+        if analysis:
+            professor_analyses.append(analysis)
+    
+    # Sort professors by overall score
+    professor_analyses.sort(key=lambda x: x['overall_score'], reverse=True)
+    
+    # Print individual details
+    print("\n=== Detailed Professor Analyses ===")
+    for analysis in professor_analyses:
+        print_professor_details(analysis)
+        print("\n" + "="*40)
+    
+    # Print rankings
+    print("\n=== Top 3 Professors ===")
+    for i, analysis in enumerate(professor_analyses[:3], 1):
+        prof = analysis['professor']
+        score = analysis['overall_score']
+        print(f"{i}. {prof.name} ({prof.department}) - Score: {score:.1f}%")
 
 if __name__ == "__main__":
     main()
