@@ -41,7 +41,7 @@ The transformer architecture starts with mapping all the tokens to a sequence of
 
 The most important part of the transformer architecture that was introduced in “Attention Is All You Need” is self-attention. Is a process in which the individual embeddings in the sequence affect the embeddings of the surrounding embeddings. Just like how words in the human language have different meanings based on the context in which they are used, embeddings in the presence of other embeddings will affect their meaning and the meaning of the embeddings around them in the input sequence. In a head of attention, an individual input embedding is given a key, query, and value vector, of the same dimensions. In the simplest terms, the key vector is affected by the surrounding embeddings in the input embedding sequence. The query vector is the vector that affects other embeddings’ key vectors in the embedding sequence. The value is the randomized intermediary tensor that amalgamates or ties together the key and query vectors. Applying these three tensors to the input embedding yields a self-attended vector that has a new position in this n-dimensional vector space that is affected by the presence of other embeddings in the input sequence. This calculation of attention is “self-attending” because it does not require the resolving of values other than its own key, query, and value parameters, and so it can be easily parallelized in what is called Multi-Headed Attention (Vaswani et al., 2017, 4).
 
-$${Attention}(Q,K,V) = \text{softmax} \left( \frac{QK^T}{\sqrt{d_k}} \right) V$$
+$${Attention}(Q,K,V) = \text{softmax} \left( \frac{QK^T}{\sqrt{d_k}} \right) V$$\
 $${softmax}(z_i) = \frac{e^{z_i}}{\sum_{j=1}^{K} e^{z_j}}$$
 
 For diffusion (image) models, a special type of attention can be applied called cross-attention. Cross-attention uses the key and query vectors for the embeddings from a separate source. This is the original design proposed in the original paper for language translation where the key and query vectors are taken from a different language like French or Spanish and fed into a Multi-Headed Attention block where the value comes from the target language (i.e. English).
@@ -58,7 +58,7 @@ Where and are learnable parameters like weights and biases of the neural network
 
 I implemented a GPT-like language model using the transformer architecture in Python. Andrej Karpathy was a great resource for building this model, big thanks to him for helping me wrap my head around these really complex machine-learning concepts. My code for the model can be found [here](https://github.com/gg-blake/cs478/blob/main/gpt/model.py). The Pytorch checkpoints can be found [here](https://github.com/gg-blake/cs478/tree/main/gpt/lm_models/openwebtext).
 
-### Transformer Architecture: Bidirectional Encoder Representations (BERT)**
+### Transformer Architecture: Bidirectional Encoder Representations (BERT)
 Following the construction of a GPT-like language model, it is not ready to be a helpful assistant. It requires fine tuning, and training on specific types of data so that the model predicts what a useful assistant would say. There are many different ways to do this, however, for my research, I focused on BERT. Bidirectional Encoder Representations (BERT) is a framework for training language models to understand human languages, specifically in the context of a question-and-answer or fill-in-the-blanks. There are four main types of BERT training methods, the one I am using is the first type, in which text is provided to the model, and randomly a subsequence of tokens is replaced with a special “mask” token to represent a blank space that should have text. The model, instead of constantly generating new text, is now required to choose a finite set of tokens to fill in the masked tokens (Devlin et al., 2018, 2). The loss is calculated using a common equation called Cross Entropy. At the time of writing this report, I am in the process of building the training environment for my model and generating quality testing data from Open AI’s Open Web Text. You can find my current code for this [here](https://github.com/gg-blake/cs478/blob/main/gpt/train_bert.py).
 
 ### Conclusion
@@ -68,26 +68,26 @@ So far, I have gained an immense amount of knowledge in the cutting-edge field i
 
 ### References
 
-Devlin, J., Chang, M.-W., Lee, K., & Toutanova, K. (2018). BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. _arxiv.org_. <https://doi.org/10.48550/arXiv.1810.04805>
-
-He, K., Zhang, X., Ren, S., & Sun, J. (2015). Deep Residual Learning for Image Recognition. _arxiv.org_. <https://doi.org/10.48550/arXiv.1512.03385>
-
-Karpathy, A. (2023, January 17). _Let's build GPT: from scratch, in code, spelled out._ YouTube. Retrieved December 26, 2024, from <https://www.youtube.com/watch?v=kCc8FmEb1nY>
-
-Karpathy, A. (2024, February 20). _Let's build the GPT Tokenizer_. YouTube. Retrieved December 26, 2024, from <https://www.youtube.com/watch?v=zduSFxRajkE>
-
-Lei Ba, J., Ryan Kiros, J., & Hinton, G. E. (2016). Layer Normalization. _arxiv.org_. <https://doi.org/10.48550/arXiv.1607.06450>
-
-Liu, Z., Wang, Y., Vaidya, S., Ruehle, F., Halverson, J., Soljačić, M., Hou, T. Y., & Tegmark, M. (2020). KAN: Kolmogorov-Arnold Networks. <https://doi.org/10.48550/arXiv.2005.14165>
-
-Open AI. (2020). Language Models are Few-Shot Learners. _arxiv.org_. <https://doi.org/10.48550/arXiv.2005.14165>
-
-Sherstinsky, A. (2018). Fundamentals of Recurrent Neural Network (RNN) and Long Short-Term Memory (LSTM) Network. _arxiv.org_. <https://doi.org/10.48550/arXiv.1808.03314>
-
-3Blue1Brown. (2017, October 5). _But what is a neural network? | Deep learning chapter 1_. YouTube. Retrieved December 26, 2024, from <https://www.youtube.com/watch?v=aircAruvnKk>
-
-3Blue1Brown. (2017, October 16). _Gradient descent, how neural networks learn | DL2_. YouTube. Retrieved December 26, 2024, from <https://www.youtube.com/watch?v=IHZwWFHWa-w>
-
+Devlin, J., Chang, M.-W., Lee, K., & Toutanova, K. (2018). BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. _arxiv.org_. <https://doi.org/10.48550/arXiv.1810.04805>\
+\
+He, K., Zhang, X., Ren, S., & Sun, J. (2015). Deep Residual Learning for Image Recognition. _arxiv.org_. <https://doi.org/10.48550/arXiv.1512.03385>\
+\
+Karpathy, A. (2023, January 17). _Let's build GPT: from scratch, in code, spelled out._ YouTube. Retrieved December 26, 2024, from <https://www.youtube.com/watch?v=kCc8FmEb1nY>\
+\
+Karpathy, A. (2024, February 20). _Let's build the GPT Tokenizer_. YouTube. Retrieved December 26, 2024, from <https://www.youtube.com/watch?v=zduSFxRajkE>\
+\
+Lei Ba, J., Ryan Kiros, J., & Hinton, G. E. (2016). Layer Normalization. _arxiv.org_. <https://doi.org/10.48550/arXiv.1607.06450>\
+\
+Liu, Z., Wang, Y., Vaidya, S., Ruehle, F., Halverson, J., Soljačić, M., Hou, T. Y., & Tegmark, M. (2020). KAN: Kolmogorov-Arnold Networks. <https://doi.org/10.48550/arXiv.2005.14165>\
+\
+Open AI. (2020). Language Models are Few-Shot Learners. _arxiv.org_. <https://doi.org/10.48550/arXiv.2005.14165>\
+\
+Sherstinsky, A. (2018). Fundamentals of Recurrent Neural Network (RNN) and Long Short-Term Memory (LSTM) Network. _arxiv.org_. <https://doi.org/10.48550/arXiv.1808.03314>\
+\
+3Blue1Brown. (2017, October 5). _But what is a neural network? | Deep learning chapter 1_. YouTube. Retrieved December 26, 2024, from <https://www.youtube.com/watch?v=aircAruvnKk>\
+\
+3Blue1Brown. (2017, October 16). _Gradient descent, how neural networks learn | DL2_. YouTube. Retrieved December 26, 2024, from <https://www.youtube.com/watch?v=IHZwWFHWa-w>\
+\
 Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A., Kaiser, L., & Polosukhin, I. (2017). Attention Is All You Need. _arxiv.org_. <https://doi.org/10.48550/arXiv.1706.03762>
 
 # Current Projects:
