@@ -48,7 +48,7 @@ For diffusion (image) models, a special type of attention can be applied called 
 
 Additionally, multiple Multi-Headed Attention blocks can be chained one after the other to improve the results of the output as well. However, longer chains of Multi-Headed Attention blocks make it harder to train from the backward pass, so the output of each Multi-Headed Attention block is added to the input embeddings in what are called residual connections. In a paper called “Deep Residual Learning for Image Recognition”, they explain how this significantly improves training performance (He et al., n.d., 2)
 
-![image.png](https://github.com/gg-blake/cs478/blob/main/image.png)
+![image.png](https://github.com/gg-blake/cs478/blob/main/image.png?raw=true)
 
 Furthermore, once the residual connections are built, we must perform what is called layer normalization to the layers to “clean” the data or rid the data of noise so to speak. In the paper “Layer Normalization” the researchers propose the following solution called layer normalization.
 
