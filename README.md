@@ -1,8 +1,5 @@
+*For instructions on how to run my custom language model and tokenizer, scroll to the bottom*
 
-Blake Moody
-CS478
-12/26/2024
-Daniel Haehn
 # LLM Research: Final Report
 
 ### Introduction
